@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pre-News Trading Surveillance</title>
+    <meta
+      name="description"
+      content="Public research dashboard for unusual pre-disclosure market activity around official corporate events."
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div class="backdrop backdrop-aurora"></div>
+    <div class="backdrop backdrop-grid"></div>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero-copy reveal">
+          <p class="eyebrow">Public Research Dashboard</p>
+          <h1>Pre-News Trading Surveillance</h1>
+          <p class="hero-text">
+            A public-facing research interface for ranking unusual trading behavior ahead of
+            official corporate disclosures. This product surfaces suspicious patterns for review.
+            It does not identify traders or make legal accusations.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#event-feed">Explore Ranked Events</a>
+            <a class="button button-secondary" href="/docs">API Docs</a>
+          </div>
+        </div>
+        <section class="hero-panel reveal reveal-delay-1">
+          <div class="hero-panel-header">
+            <span class="panel-kicker">Surveillance Snapshot</span>
+            <span id="freshness-pill" class="pill pill-muted">Loading</span>
+          </div>
+          <div class="hero-metrics">
+            <article class="metric-card">
+              <span class="metric-label">Tracked Events</span>
+              <strong id="metric-total-events" class="metric-value">0</strong>
+              <span id="metric-coverage" class="metric-note">Coverage pending</span>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">Average Score</span>
+              <strong id="metric-average-score" class="metric-value">0.0</strong>
+              <span id="metric-peak-score" class="metric-note">Peak 0.0</span>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">High-Risk Flags</span>
+              <strong id="metric-high-risk" class="metric-value">0</strong>
+              <span id="metric-tickers" class="metric-note">0 issuers tracked</span>
+            </article>
+          </div>
+        </section>
+      </header>
+
+      <main class="dashboard">
+        <section class="signal-strip reveal reveal-delay-2">
+          <article class="signal-tile">
+            <span class="signal-label">Research posture</span>
+            <p>Public-data ranking for analyst triage, not enforcement or accusation.</p>
+          </article>
+          <article class="signal-tile">
+            <span class="signal-label">Primary sources</span>
+            <p>Official filings, issuer disclosures, local NLP enrichment, and market anomaly features.</p>
+          </article>
+          <article class="signal-tile">
+            <span class="signal-label">Scoring logic</span>
+            <p>Event impact, novelty, sentiment alignment, and abnormal pre-event trading behavior.</p>
+          </article>
+        </section>
+
+        <section class="insight-grid">
+          <article class="panel reveal">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Score Bands</p>
+                <h2>Risk Distribution</h2>
+              </div>
+              <p class="panel-caption">How the current corpus spreads across low, medium, and high-ranked events.</p>
+            </div>
+            <div id="score-band-chart" class="stat-list empty-state">Loading score bands...</div>
+          </article>
+
+          <article class="panel reveal reveal-delay-1">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Event Mix</p>
+                <h2>Highest-Volume Categories</h2>
+              </div>
+              <p class="panel-caption">Top disclosure categories by event count and average suspiciousness.</p>
+            </div>
+            <div id="event-type-chart" class="stat-list empty-state">Loading event categories...</div>
+          </article>
+
+          <article class="panel reveal reveal-delay-2">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Issuer Focus</p>
+                <h2>Most Exposed Tickers</h2>
+              </div>
+              <p class="panel-caption">Tickers with the strongest concentration of high-scoring research events.</p>
+            </div>
+            <div id="ticker-chart" class="stat-list empty-state">Loading tickers...</div>
+          </article>
+
+          <article class="panel reveal reveal-delay-3">
+            <div class="panel-header">
+              <div>
+                <p class="panel-kicker">Recent Activity</p>
+                <h2>Disclosure Timeline</h2>
+              </div>
+              <p class="panel-caption">Recent event cadence with average daily suspiciousness.</p>
+            </div>
+            <div id="activity-chart" class="activity-chart empty-state">Loading activity...</div>
+          </article>
+        </section>
+
+        <section class="workspace">
+          <div class="workspace-main">
+            <article class="panel control-panel reveal">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Event Search</p>
+                  <h2>Ranked Event Feed</h2>
+                </div>
+                <p class="panel-caption">Filter the public event corpus by issuer, event category, and minimum score.</p>
+              </div>
+
+              <form id="filters-form" class="filters">
+                <label class="field">
+                  <span class="field-label">Ticker</span>
+                  <input id="ticker-input" name="ticker" type="text" placeholder="AAPL" maxlength="10" />
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Event Type</span>
+                  <select id="event-type-select" name="event_type">
+                    <option value="">All categories</option>
+                  </select>
+                </label>
+
+                <label class="field field-slider">
+                  <span class="field-label">Minimum Score</span>
+                  <div class="slider-row">
+                    <input id="min-score-input" name="min_score" type="range" min="0" max="100" value="20" />
+                    <strong id="min-score-value">20</strong>
+                  </div>
+                </label>
+
+                <label class="field">
+                  <span class="field-label">Rows</span>
+                  <select id="limit-select" name="limit">
+                    <option value="12">12</option>
+                    <option value="24" selected>24</option>
+                    <option value="48">48</option>
+                  </select>
+                </label>
+
+                <div class="filter-actions">
+                  <button class="button button-primary" type="submit">Apply Filters</button>
+                  <button id="reset-filters" class="button button-secondary" type="button">Reset</button>
+                </div>
+              </form>
+            </article>
+
+            <section id="event-feed" class="event-feed" aria-live="polite">
+              <div class="empty-state">Loading ranked events...</div>
+            </section>
+          </div>
+
+          <aside class="detail-rail">
+            <article class="panel detail-panel reveal reveal-delay-1">
+              <div class="panel-header">
+                <div>
+                  <p class="panel-kicker">Selected Event</p>
+                  <h2>Case Detail</h2>
+                </div>
+                <p class="panel-caption">Feature-level view of the currently selected ranked event.</p>
+              </div>
+              <div id="event-detail" class="detail-content empty-state">
+                Select an event to inspect the score composition, metadata, and market signals.
+              </div>
+            </article>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <noscript>
+      <div class="noscript-banner">
+        This dashboard requires JavaScript to load ranked events and research summaries.
+      </div>
+    </noscript>
+  </body>
+</html>

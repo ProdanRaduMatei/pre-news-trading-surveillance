@@ -1,20 +1,41 @@
 from __future__ import annotations
 
+from importlib.resources import files
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .. import db
 from ..settings import default_paths
+
+UI_PACKAGE = "pre_news_trading_surveillance.ui"
 
 app = FastAPI(
     title="Pre-News Trading Surveillance API",
     version="0.1.0",
     description="Public-facing research API for unusual pre-disclosure market activity.",
 )
+app.mount("/static", StaticFiles(packages=[(UI_PACKAGE, "static")]), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def dashboard() -> HTMLResponse:
+    index_html = files(UI_PACKAGE).joinpath("static/index.html").read_text(encoding="utf-8")
+    return HTMLResponse(index_html)
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/summary")
+def summary() -> dict[str, object]:
+    paths = default_paths()
+    payload = db.get_dashboard_summary(paths.db_path)
+    payload["api"] = {"name": app.title, "version": app.version}
+    return payload
 
 
 @app.get("/events")

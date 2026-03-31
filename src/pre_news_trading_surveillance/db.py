@@ -18,6 +18,31 @@ def _require_duckdb():
     return duckdb
 
 
+def _fetch_rows(
+    db_path: Path,
+    query: str,
+    params: list[object] | None = None,
+) -> tuple[list[str], list[tuple[object, ...]]]:
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        cursor = connection.execute(query, params or [])
+        rows = cursor.fetchall()
+        columns = [column[0] for column in cursor.description]
+    finally:
+        connection.close()
+    return columns, rows
+
+
+def _fetch_dict_rows(
+    db_path: Path,
+    query: str,
+    params: list[object] | None = None,
+) -> list[dict[str, object]]:
+    columns, rows = _fetch_rows(db_path, query, params)
+    return [_row_to_dict(columns, row) for row in rows]
+
+
 def init_database(db_path: Path, schema_path: Path | None = None, schema_dir: Path | None = None) -> Path:
     duckdb = _require_duckdb()
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -520,19 +545,10 @@ def list_ranked_events(
 
     query += " ORDER BY COALESCE(s.suspiciousness_score, 0) DESC, e.first_public_at DESC LIMIT ?"
     params.append(limit)
-
-    connection = duckdb.connect(str(db_path))
-    try:
-        columns = [column[0] for column in connection.execute(query, params).description]
-        rows = connection.execute(query, params).fetchall()
-    finally:
-        connection.close()
-
-    return [_row_to_dict(columns, row) for row in rows]
+    return _fetch_dict_rows(db_path, query, params)
 
 
 def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
-    duckdb = _require_duckdb()
     query = """
         SELECT
           e.event_id,
@@ -558,9 +574,11 @@ def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
           e.source_quality,
           e.novelty,
           e.impact_score,
+          CAST(e.built_at AS VARCHAR) AS built_at,
           f.pre_1d_return,
           f.pre_5d_return,
           f.pre_20d_return,
+          CAST(f.as_of_date AS VARCHAR) AS as_of_date,
           f.volume_z_1d,
           f.volume_z_5d,
           f.volatility_20d,
@@ -571,24 +589,114 @@ def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
           s.suspiciousness_score,
           s.score_band,
           s.directional_alignment,
-          s.explanation_payload
+          s.explanation_payload,
+          CAST(s.scored_at AS VARCHAR) AS scored_at
         FROM events e
         LEFT JOIN event_market_features_daily f ON e.event_id = f.event_id
         LEFT JOIN event_scores s ON e.event_id = s.event_id
         WHERE e.event_id = ?
     """
+    columns, rows = _fetch_rows(db_path, query, [event_id])
+    if not rows:
+        return None
+    return _row_to_dict(columns, rows[0])
 
-    connection = duckdb.connect(str(db_path))
-    try:
-        cursor = connection.execute(query, [event_id])
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        columns = [column[0] for column in cursor.description]
-    finally:
-        connection.close()
 
-    return _row_to_dict(columns, row)
+def get_dashboard_summary(db_path: Path) -> dict[str, object]:
+    overview = _fetch_dict_rows(
+        db_path,
+        """
+        SELECT
+          COUNT(*) AS total_events,
+          COUNT(DISTINCT e.ticker) AS tracked_tickers,
+          CAST(MIN(e.first_public_at) AS VARCHAR) AS coverage_start,
+          CAST(MAX(e.first_public_at) AS VARCHAR) AS coverage_end,
+          ROUND(COALESCE(AVG(s.suspiciousness_score), 0), 2) AS average_score,
+          ROUND(COALESCE(MAX(s.suspiciousness_score), 0), 2) AS peak_score,
+          COALESCE(SUM(CASE WHEN s.score_band = 'High' THEN 1 ELSE 0 END), 0) AS high_risk_events,
+          COALESCE(SUM(CASE WHEN s.score_band = 'Medium' THEN 1 ELSE 0 END), 0) AS medium_risk_events,
+          COALESCE(SUM(CASE WHEN s.score_band = 'Low' THEN 1 ELSE 0 END), 0) AS low_risk_events,
+          CAST(MAX(e.built_at) AS VARCHAR) AS last_built_at,
+          CAST(MAX(s.scored_at) AS VARCHAR) AS last_scored_at
+        FROM events e
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        """,
+    )[0]
+
+    score_bands = _fetch_dict_rows(
+        db_path,
+        """
+        SELECT
+          COALESCE(s.score_band, 'Unscored') AS score_band,
+          COUNT(*) AS event_count,
+          ROUND(COALESCE(AVG(s.suspiciousness_score), 0), 2) AS average_score
+        FROM events e
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        GROUP BY 1
+        ORDER BY CASE COALESCE(s.score_band, 'Unscored')
+          WHEN 'High' THEN 1
+          WHEN 'Medium' THEN 2
+          WHEN 'Low' THEN 3
+          ELSE 4
+        END
+        """,
+    )
+
+    event_types = _fetch_dict_rows(
+        db_path,
+        """
+        SELECT
+          e.event_type,
+          COUNT(*) AS event_count,
+          ROUND(COALESCE(AVG(s.suspiciousness_score), 0), 2) AS average_score,
+          ROUND(COALESCE(MAX(s.suspiciousness_score), 0), 2) AS peak_score
+        FROM events e
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        GROUP BY 1
+        ORDER BY event_count DESC, average_score DESC, e.event_type ASC
+        LIMIT 8
+        """,
+    )
+
+    top_tickers = _fetch_dict_rows(
+        db_path,
+        """
+        SELECT
+          e.ticker,
+          COUNT(*) AS event_count,
+          ROUND(COALESCE(AVG(s.suspiciousness_score), 0), 2) AS average_score,
+          ROUND(COALESCE(MAX(s.suspiciousness_score), 0), 2) AS peak_score
+        FROM events e
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        GROUP BY 1
+        ORDER BY peak_score DESC, event_count DESC, e.ticker ASC
+        LIMIT 8
+        """,
+    )
+
+    recent_activity = _fetch_dict_rows(
+        db_path,
+        """
+        SELECT
+          CAST(DATE_TRUNC('day', e.first_public_at) AS VARCHAR) AS event_day,
+          COUNT(*) AS event_count,
+          ROUND(COALESCE(AVG(s.suspiciousness_score), 0), 2) AS average_score
+        FROM events e
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        GROUP BY 1
+        ORDER BY event_day DESC
+        LIMIT 10
+        """,
+    )
+    recent_activity.reverse()
+
+    return {
+        "overview": overview,
+        "score_bands": score_bands,
+        "event_types": event_types,
+        "top_tickers": top_tickers,
+        "recent_activity": recent_activity,
+    }
 
 
 def record_ingestion_run(

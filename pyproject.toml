@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "httpx>=0.27.0",
   "pytest>=8.0.0",
 ]
 nlp = [
@@ -29,6 +30,10 @@ pnts = "pre_news_trading_surveillance.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"pre_news_trading_surveillance.ui" = ["static/*.html", "static/*.css", "static/*.js"]

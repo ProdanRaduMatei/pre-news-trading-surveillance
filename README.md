@@ -26,7 +26,7 @@ Pre-News Trading Surveillance is a public-facing research platform for ranking u
   - ingests daily market bars from CSV
   - computes daily pre-event market features
   - assigns explainable suspiciousness scores
-  - serves ranked events from a small API
+  - serves ranked events from a public dashboard plus JSON API
 
 ## Project Layout
 
@@ -110,6 +110,8 @@ Run the local API:
 pnts serve-api --host 127.0.0.1 --port 8000
 ```
 
+Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboard or [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs) for the API schema.
+
 ## Current CLI Commands
 
 - `pnts bootstrap`
@@ -120,6 +122,15 @@ pnts serve-api --host 127.0.0.1 --port 8000
 - `pnts compute-daily-features`
 - `pnts score-events`
 - `pnts serve-api`
+
+## Public Dashboard
+
+The app now includes a polished public dashboard served directly from FastAPI. It provides:
+
+- top-level coverage, score, and freshness metrics
+- breakdowns for score bands, event types, top tickers, and recent activity
+- a filterable ranked event feed
+- an event detail rail with scoring explanation, feature values, and source links
 
 ## Core Docs
 
