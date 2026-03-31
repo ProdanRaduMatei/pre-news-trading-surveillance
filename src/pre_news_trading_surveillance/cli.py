@@ -8,6 +8,7 @@ from .events import sec_events
 from .features import daily as daily_features
 from .features import minute as minute_features
 from .ingest import market, sec
+from .pipeline import refresh as refresh_pipeline
 from .scoring import rules
 from .settings import default_paths
 
@@ -240,6 +241,28 @@ def build_parser() -> argparse.ArgumentParser:
     score_events.add_argument(
         "--ticker",
         help="Optional single-ticker filter.",
+    )
+
+    refresh_job = subparsers.add_parser(
+        "refresh-pipeline",
+        help="Run the scheduled end-to-end refresh pipeline from a config file.",
+    )
+    refresh_job.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/refresh_pipeline.example.toml"),
+        help="Path to the refresh pipeline TOML config.",
+    )
+    refresh_job.add_argument(
+        "--mode",
+        choices=["full", "intraday"],
+        default="full",
+        help="Predefined refresh mode when explicit steps are not provided.",
+    )
+    refresh_job.add_argument(
+        "--steps",
+        nargs="*",
+        help="Optional explicit refresh steps to run.",
     )
 
     serve_api = subparsers.add_parser(
@@ -575,6 +598,27 @@ def cmd_score_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_refresh_pipeline(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    config_path = args.config
+    if not config_path.is_absolute():
+        config_path = paths.root / config_path
+    if not config_path.exists():
+        raise SystemExit(f"Refresh config not found: {config_path}")
+
+    config = refresh_pipeline.load_refresh_config(config_path)
+    steps = refresh_pipeline.resolve_refresh_steps(args.mode, args.steps)
+    completed = refresh_pipeline.run_refresh_pipeline(
+        config=config,
+        steps=steps,
+        cli_module=__import__(__name__, fromlist=["dummy"]),
+        paths=paths,
+    )
+    print(f"Completed refresh pipeline with steps: {', '.join(completed)}")
+    return 0
+
+
 def cmd_serve_api(args: argparse.Namespace) -> int:
     try:
         import uvicorn
@@ -620,6 +664,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compute_minute_features(args)
     if args.command == "score-events":
         return cmd_score_events(args)
+    if args.command == "refresh-pipeline":
+        return cmd_refresh_pipeline(args)
     if args.command == "serve-api":
         return cmd_serve_api(args)
 

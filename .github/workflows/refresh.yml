@@ -1,0 +1,59 @@
+name: Refresh Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Refresh mode
+        required: true
+        default: full
+        type: choice
+        options:
+          - full
+          - intraday
+  schedule:
+    - cron: "15 * * * 1-5"
+    - cron: "25 22 * * 1-5"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    env:
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+      ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Determine refresh mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ inputs.mode }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "25 22 * * 1-5" ]; then
+            echo "mode=full" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=intraday" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run scheduled refresh
+        run: |
+          pnts refresh-pipeline \
+            --config configs/refresh_pipeline.example.toml \
+            --mode "${{ steps.mode.outputs.mode }}"
+
+      - name: Upload DuckDB artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnts-duckdb-${{ steps.mode.outputs.mode }}-${{ github.run_id }}
+          path: data/gold/pnts.duckdb
+          if-no-files-found: ignore

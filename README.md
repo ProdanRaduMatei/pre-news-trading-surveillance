@@ -112,6 +112,14 @@ pnts compute-minute-features
 pnts score-events
 ```
 
+Run the orchestrated refresh pipeline from config:
+
+```bash
+export SEC_USER_AGENT="Your Name your-email@example.com"
+export ALPHAVANTAGE_API_KEY="your-key"
+pnts refresh-pipeline --config configs/refresh_pipeline.example.toml --mode full
+```
+
 If you already have local models on disk, you can switch the SEC event builder to richer on-device NLP backends:
 
 ```bash
@@ -144,6 +152,7 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - `pnts compute-daily-features`
 - `pnts compute-minute-features`
 - `pnts score-events`
+- `pnts refresh-pipeline --config configs/refresh_pipeline.example.toml --mode full|intraday`
 - `pnts serve-api`
 
 ## Provider Notes
@@ -160,6 +169,18 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - breakdowns for score bands, event types, top tickers, and recent activity
 - a filterable ranked event feed
 - an event detail rail with scoring explanation, feature values, and source links
+
+## Scheduled Refresh
+
+- The repo now includes a config-driven orchestrator at `pnts refresh-pipeline`.
+- The sample config lives at [configs/refresh_pipeline.example.toml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/configs/refresh_pipeline.example.toml).
+- GitHub Actions scheduling lives at [.github/workflows/refresh.yml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/.github/workflows/refresh.yml).
+- The workflow assumes two repository secrets:
+  - `SEC_USER_AGENT`
+  - `ALPHAVANTAGE_API_KEY`
+- Default schedules:
+  - weekday hourly intraday refresh at `15` minutes past the hour UTC
+  - weekday full refresh at `22:25 UTC`
 
 ## Core Docs
 

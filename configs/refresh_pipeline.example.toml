@@ -1,0 +1,33 @@
+tickers = ["AAPL", "MSFT", "NVDA"]
+
+[sec]
+user_agent = ""
+user_agent_env = "SEC_USER_AGENT"
+refresh_reference = true
+per_ticker_limit = 50
+forms = ["8-K", "6-K"]
+
+[market]
+provider = "alpha_vantage"
+api_key = ""
+api_key_env = "ALPHAVANTAGE_API_KEY"
+timeout_seconds = 30
+
+[market.daily]
+enabled = true
+outputsize = "compact"
+
+[market.minute]
+enabled = true
+interval = "1min"
+outputsize = "compact"
+month = ""
+entitlement = ""
+adjusted = false
+extended_hours = true
+
+[nlp]
+sentiment_backend = "heuristic"
+sentiment_model = ""
+novelty_backend = "lexical"
+novelty_model = ""

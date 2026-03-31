@@ -30,6 +30,8 @@ Deploy a public-facing research product with a conservative serving model and a 
 - daily ingestion
 - daily feature refresh
 - daily score publication
+- config-driven orchestration via `pnts refresh-pipeline`
+- cron or scheduler integration for intraday and full refresh modes
 
 ## Reference Cloud Shape
 
@@ -53,6 +55,12 @@ For public launch, publish:
 
 The project includes a starter GitHub Actions workflow in [.github/workflows/ci.yml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/.github/workflows/ci.yml).
 
+Scheduled refresh automation now lives in [.github/workflows/refresh.yml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/.github/workflows/refresh.yml). It supports:
+
+- weekday hourly intraday refresh
+- weekday full refresh
+- manual `workflow_dispatch` for either mode
+
 For a standalone repository, extend it with:
 
 - lint and formatting checks
@@ -66,3 +74,29 @@ For a standalone repository, extend it with:
 - schema migration discipline
 - request logging on public endpoints
 - monitoring on ingestion, scoring, and serving freshness
+
+## Environment Contracts
+
+The scheduled refresh workflow assumes:
+
+- `SEC_USER_AGENT` secret for SEC-compliant requests
+- `ALPHAVANTAGE_API_KEY` secret for market data pulls
+- refresh config checked into the repo, with secrets injected through environment variables rather than hardcoded in config
+
+## Recommended Refresh Split
+
+- `intraday` mode:
+  - SEC filings
+  - minute bars
+  - canonical events
+  - minute features
+  - scores
+- `full` mode:
+  - SEC reference
+  - SEC filings
+  - daily bars
+  - minute bars
+  - canonical events
+  - daily features
+  - minute features
+  - scores
