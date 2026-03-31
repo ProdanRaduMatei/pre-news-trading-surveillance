@@ -4,7 +4,14 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from .domain import CanonicalEvent, EventMarketFeature, EventScore, MarketBarDaily
+from .domain import (
+    CanonicalEvent,
+    EventMarketFeature,
+    EventMarketFeatureMinute,
+    EventScore,
+    MarketBarDaily,
+    MarketBarMinute,
+)
 from .ingest.models import RawFilingRecord, TickerReference
 
 
@@ -171,6 +178,46 @@ def upsert_market_bars_daily(db_path: Path, bars: list[MarketBarDaily]) -> int:
     return len(bars)
 
 
+def upsert_market_bars_minute(db_path: Path, bars: list[MarketBarMinute]) -> int:
+    if not bars:
+        return 0
+
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        connection.begin()
+        connection.executemany(
+            "DELETE FROM market_bars_minute WHERE bar_id = ?",
+            [(bar.bar_id,) for bar in bars],
+        )
+        connection.executemany(
+            """
+            INSERT INTO market_bars_minute (
+              bar_id,
+              ticker,
+              bar_start,
+              trading_date,
+              open,
+              high,
+              low,
+              close,
+              volume,
+              source,
+              ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [bar.as_db_row() for bar in bars],
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return len(bars)
+
+
 def upsert_events(db_path: Path, events: list[CanonicalEvent]) -> int:
     if not events:
         return 0
@@ -250,6 +297,51 @@ def upsert_event_market_features(db_path: Path, features: list[EventMarketFeatur
               volatility_20d,
               gap_pct,
               avg_volume_20d,
+              bars_used,
+              computed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [feature.as_db_row() for feature in features],
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return len(features)
+
+
+def upsert_event_market_features_minute(
+    db_path: Path,
+    features: list[EventMarketFeatureMinute],
+) -> int:
+    if not features:
+        return 0
+
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        connection.begin()
+        connection.executemany(
+            "DELETE FROM event_market_features_minute WHERE event_id = ?",
+            [(feature.event_id,) for feature in features],
+        )
+        connection.executemany(
+            """
+            INSERT INTO event_market_features_minute (
+              event_id,
+              ticker,
+              as_of_timestamp,
+              pre_15m_return,
+              pre_60m_return,
+              pre_240m_return,
+              volume_z_15m,
+              volume_z_60m,
+              realized_vol_60m,
+              range_pct_60m,
+              last_bar_at,
               bars_used,
               computed_at
             )
@@ -495,6 +587,54 @@ def load_market_bars_daily(db_path: Path, ticker: str | None = None) -> list[Mar
     ]
 
 
+def load_market_bars_minute(db_path: Path, ticker: str | None = None) -> list[MarketBarMinute]:
+    duckdb = _require_duckdb()
+    query = """
+        SELECT
+          bar_id,
+          ticker,
+          CAST(bar_start AS VARCHAR) AS bar_start,
+          CAST(trading_date AS VARCHAR) AS trading_date,
+          open,
+          high,
+          low,
+          close,
+          volume,
+          source,
+          CAST(ingested_at AS VARCHAR) AS ingested_at
+        FROM market_bars_minute
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if ticker:
+        query += " AND ticker = ?"
+        params.append(ticker.upper())
+    query += " ORDER BY ticker, bar_start ASC"
+
+    connection = duckdb.connect(str(db_path))
+    try:
+        rows = connection.execute(query, params).fetchall()
+    finally:
+        connection.close()
+
+    return [
+        MarketBarMinute(
+            bar_id=row[0],
+            ticker=row[1],
+            bar_start=row[2],
+            trading_date=row[3],
+            open=float(row[4]),
+            high=float(row[5]),
+            low=float(row[6]),
+            close=float(row[7]),
+            volume=int(row[8]),
+            source=row[9],
+            ingested_at=row[10],
+        )
+        for row in rows
+    ]
+
+
 def list_ranked_events(
     db_path: Path,
     limit: int = 25,
@@ -524,11 +664,16 @@ def list_ranked_events(
           f.pre_5d_return,
           f.volume_z_1d,
           f.volume_z_5d,
+          fm.pre_15m_return,
+          fm.pre_60m_return,
+          fm.volume_z_15m,
+          fm.volume_z_60m,
           s.suspiciousness_score,
           s.score_band,
           s.explanation_payload
         FROM events e
         LEFT JOIN event_market_features_daily f ON e.event_id = f.event_id
+        LEFT JOIN event_market_features_minute fm ON e.event_id = fm.event_id
         LEFT JOIN event_scores s ON e.event_id = s.event_id
         WHERE 1 = 1
     """
@@ -585,6 +730,16 @@ def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
           f.gap_pct,
           f.avg_volume_20d,
           f.bars_used,
+          fm.pre_15m_return,
+          fm.pre_60m_return,
+          fm.pre_240m_return,
+          CAST(fm.as_of_timestamp AS VARCHAR) AS minute_as_of_timestamp,
+          fm.volume_z_15m,
+          fm.volume_z_60m,
+          fm.realized_vol_60m,
+          fm.range_pct_60m,
+          CAST(fm.last_bar_at AS VARCHAR) AS last_bar_at,
+          fm.bars_used AS minute_bars_used,
           s.rule_score,
           s.suspiciousness_score,
           s.score_band,
@@ -593,6 +748,7 @@ def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
           CAST(s.scored_at AS VARCHAR) AS scored_at
         FROM events e
         LEFT JOIN event_market_features_daily f ON e.event_id = f.event_id
+        LEFT JOIN event_market_features_minute fm ON e.event_id = fm.event_id
         LEFT JOIN event_scores s ON e.event_id = s.event_id
         WHERE e.event_id = ?
     """

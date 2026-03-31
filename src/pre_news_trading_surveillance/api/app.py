@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from importlib.resources import files
 
 from fastapi import FastAPI, HTTPException, Query
@@ -11,10 +12,20 @@ from ..settings import default_paths
 
 UI_PACKAGE = "pre_news_trading_surveillance.ui"
 
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    paths = default_paths()
+    paths.ensure_directories()
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    yield
+
+
 app = FastAPI(
     title="Pre-News Trading Surveillance API",
     version="0.1.0",
     description="Public-facing research API for unusual pre-disclosure market activity.",
+    lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(packages=[(UI_PACKAGE, "static")]), name="static")
 

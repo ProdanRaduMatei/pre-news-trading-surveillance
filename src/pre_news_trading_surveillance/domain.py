@@ -35,6 +35,41 @@ class MarketBarDaily:
 
 
 @dataclass(frozen=True)
+class MarketBarMinute:
+    bar_id: str
+    ticker: str
+    bar_start: str
+    trading_date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: int
+    source: str
+    ingested_at: str
+
+    def as_db_row(
+        self,
+    ) -> tuple[str, str, str, str, float, float, float, float, int, str, str]:
+        return (
+            self.bar_id,
+            self.ticker,
+            self.bar_start,
+            self.trading_date,
+            self.open,
+            self.high,
+            self.low,
+            self.close,
+            self.volume,
+            self.source,
+            self.ingested_at,
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class CanonicalEvent:
     event_id: str
     source_event_id: str
@@ -165,6 +200,59 @@ class EventMarketFeature:
             self.volatility_20d,
             self.gap_pct,
             self.avg_volume_20d,
+            self.bars_used,
+            self.computed_at,
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class EventMarketFeatureMinute:
+    event_id: str
+    ticker: str
+    as_of_timestamp: str
+    pre_15m_return: float | None
+    pre_60m_return: float | None
+    pre_240m_return: float | None
+    volume_z_15m: float | None
+    volume_z_60m: float | None
+    realized_vol_60m: float | None
+    range_pct_60m: float | None
+    last_bar_at: str | None
+    bars_used: int
+    computed_at: str
+
+    def as_db_row(
+        self,
+    ) -> tuple[
+        str,
+        str,
+        str,
+        float | None,
+        float | None,
+        float | None,
+        float | None,
+        float | None,
+        float | None,
+        float | None,
+        str | None,
+        int,
+        str,
+    ]:
+        return (
+            self.event_id,
+            self.ticker,
+            self.as_of_timestamp,
+            self.pre_15m_return,
+            self.pre_60m_return,
+            self.pre_240m_return,
+            self.volume_z_15m,
+            self.volume_z_60m,
+            self.realized_vol_60m,
+            self.range_pct_60m,
+            self.last_bar_at,
             self.bars_used,
             self.computed_at,
         )

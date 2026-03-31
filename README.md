@@ -24,7 +24,9 @@ Pre-News Trading Surveillance is a public-facing research platform for ranking u
 - a canonical SEC event builder and rule-based scoring pipeline that:
   - builds publishable event rows from raw SEC filings
   - ingests daily market bars from CSV
+  - ingests minute market bars from CSV
   - computes daily pre-event market features
+  - computes minute pre-event market features
   - assigns explainable suspiciousness scores
   - serves ranked events from a public dashboard plus JSON API
 
@@ -85,11 +87,18 @@ Import daily market bars from a CSV with headers `ticker,date,open,high,low,clos
 pnts ingest-market-daily --csv /absolute/path/to/market_daily.csv
 ```
 
-Build canonical SEC events, compute daily features, and score them:
+Import minute market bars from a CSV with headers `ticker,timestamp,open,high,low,close,volume`:
+
+```bash
+pnts ingest-market-minute --csv /absolute/path/to/market_minute.csv
+```
+
+Build canonical SEC events, compute daily and minute features, and score them:
 
 ```bash
 pnts build-sec-events --forms 8-K 6-K
 pnts compute-daily-features
+pnts compute-minute-features
 pnts score-events
 ```
 
@@ -118,8 +127,10 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - `pnts ingest-sec-reference --user-agent "..."`
 - `pnts ingest-sec-filings --user-agent "..." --tickers AAPL MSFT`
 - `pnts ingest-market-daily --csv /path/to/file.csv`
+- `pnts ingest-market-minute --csv /path/to/file.csv`
 - `pnts build-sec-events --sentiment-backend heuristic|finbert --novelty-backend lexical|sentence-transformers`
 - `pnts compute-daily-features`
+- `pnts compute-minute-features`
 - `pnts score-events`
 - `pnts serve-api`
 

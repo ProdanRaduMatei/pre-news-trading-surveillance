@@ -6,6 +6,7 @@ from pathlib import Path
 from . import db
 from .events import sec_events
 from .features import daily as daily_features
+from .features import minute as minute_features
 from .ingest import sec
 from .scoring import rules
 from .settings import default_paths
@@ -89,6 +90,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Source label stored with the imported bars.",
     )
 
+    ingest_market_minute = subparsers.add_parser(
+        "ingest-market-minute",
+        help="Load minute market bars from a CSV file into storage.",
+    )
+    ingest_market_minute.add_argument("--csv", type=Path, required=True, help="CSV path.")
+    ingest_market_minute.add_argument(
+        "--source",
+        default="csv_import",
+        help="Source label stored with the imported bars.",
+    )
+
     build_events = subparsers.add_parser(
         "build-sec-events",
         help="Build canonical SEC-backed events from raw filing rows.",
@@ -123,6 +135,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Compute daily pre-event market features for canonical events.",
     )
     compute_features.add_argument(
+        "--ticker",
+        help="Optional single-ticker filter.",
+    )
+
+    compute_minute_features = subparsers.add_parser(
+        "compute-minute-features",
+        help="Compute minute pre-event market features for canonical events.",
+    )
+    compute_minute_features.add_argument(
         "--ticker",
         help="Optional single-ticker filter.",
     )
@@ -259,6 +280,23 @@ def cmd_ingest_market_daily(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_market_minute(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    bars = minute_features.load_market_bars_from_csv(args.csv, source=args.source)
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    inserted = db.upsert_market_bars_minute(paths.db_path, bars)
+    db.record_ingestion_run(
+        db_path=paths.db_path,
+        pipeline_name="market_bars_minute_csv",
+        status="success",
+        row_count=inserted,
+        metadata={"csv_path": str(args.csv), "source": args.source},
+    )
+    print(f"Stored {inserted} minute market bars from {args.csv}")
+    return 0
+
+
 def cmd_build_sec_events(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
@@ -305,6 +343,25 @@ def cmd_compute_daily_features(args: argparse.Namespace) -> int:
         metadata={"ticker": args.ticker},
     )
     print(f"Computed {inserted} daily feature rows")
+    return 0
+
+
+def cmd_compute_minute_features(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    events = db.load_events(paths.db_path, ticker=args.ticker)
+    bars = db.load_market_bars_minute(paths.db_path, ticker=args.ticker)
+    features = minute_features.compute_event_market_features(events, bars)
+    inserted = db.upsert_event_market_features_minute(paths.db_path, features)
+    db.record_ingestion_run(
+        db_path=paths.db_path,
+        pipeline_name="compute_minute_features",
+        status="success",
+        row_count=inserted,
+        metadata={"ticker": args.ticker},
+    )
+    print(f"Computed {inserted} minute feature rows")
     return 0
 
 
@@ -355,10 +412,14 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_ingest_sec_filings(args)
     if args.command == "ingest-market-daily":
         return cmd_ingest_market_daily(args)
+    if args.command == "ingest-market-minute":
+        return cmd_ingest_market_minute(args)
     if args.command == "build-sec-events":
         return cmd_build_sec_events(args)
     if args.command == "compute-daily-features":
         return cmd_compute_daily_features(args)
+    if args.command == "compute-minute-features":
+        return cmd_compute_minute_features(args)
     if args.command == "score-events":
         return cmd_score_events(args)
     if args.command == "serve-api":
