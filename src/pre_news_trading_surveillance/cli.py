@@ -99,6 +99,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=["8-K", "6-K"],
         help="Optional SEC form filters.",
     )
+    build_events.add_argument(
+        "--sentiment-backend",
+        default="heuristic",
+        help="Sentiment backend: heuristic or finbert.",
+    )
+    build_events.add_argument(
+        "--sentiment-model",
+        help="Optional local model path or model name for the sentiment backend.",
+    )
+    build_events.add_argument(
+        "--novelty-backend",
+        default="lexical",
+        help="Novelty backend: lexical or sentence-transformers.",
+    )
+    build_events.add_argument(
+        "--novelty-model",
+        help="Optional local model path or model name for the novelty backend.",
+    )
 
     compute_features = subparsers.add_parser(
         "compute-daily-features",
@@ -246,14 +264,26 @@ def cmd_build_sec_events(args: argparse.Namespace) -> int:
     paths.ensure_directories()
     db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
     filings = db.load_raw_filings(paths.db_path, forms=args.forms)
-    events = sec_events.build_canonical_events_from_filings(filings)
+    events = sec_events.build_canonical_events_from_filings(
+        filings,
+        sentiment_backend_name=args.sentiment_backend,
+        novelty_backend_name=args.novelty_backend,
+        sentiment_model=args.sentiment_model,
+        novelty_model=args.novelty_model,
+    )
     inserted = db.upsert_events(paths.db_path, events)
     db.record_ingestion_run(
         db_path=paths.db_path,
         pipeline_name="build_sec_events",
         status="success",
         row_count=inserted,
-        metadata={"forms": args.forms},
+        metadata={
+            "forms": args.forms,
+            "sentiment_backend": args.sentiment_backend,
+            "sentiment_model": args.sentiment_model,
+            "novelty_backend": args.novelty_backend,
+            "novelty_model": args.novelty_model,
+        },
     )
     print(f"Built {inserted} canonical events")
     return 0

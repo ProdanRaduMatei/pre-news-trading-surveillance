@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pre_news_trading_surveillance.ingest.sec import (  # noqa: E402
     normalize_acceptance_datetime,
+    normalize_items_json,
     parse_company_tickers,
     parse_recent_filings,
 )
@@ -37,6 +38,7 @@ class SecParsingTests(unittest.TestCase):
                     "filingDate": ["2024-01-02"],
                     "acceptanceDateTime": ["20240102163045"],
                     "form": ["8-K"],
+                    "items": ["2.02 9.01"],
                     "primaryDocument": ["a8k.htm"],
                     "primaryDocDescription": ["Current report"],
                 }
@@ -51,6 +53,7 @@ class SecParsingTests(unittest.TestCase):
         self.assertEqual(rows[0].raw_path, "/tmp/apple.json")
         self.assertTrue(rows[0].source_url.endswith("/a8k.htm"))
         self.assertEqual(rows[0].accepted_at, "2024-01-02T16:30:45+00:00")
+        self.assertEqual(rows[0].items_json, '["2.02", "9.01"]')
 
     def test_normalize_acceptance_datetime_handles_iso_zulu(self) -> None:
         value = "2024-02-10T21:12:05.000Z"
@@ -58,6 +61,9 @@ class SecParsingTests(unittest.TestCase):
             normalize_acceptance_datetime(value),
             "2024-02-10T21:12:05+00:00",
         )
+
+    def test_normalize_items_json_handles_list(self) -> None:
+        self.assertEqual(normalize_items_json(["Item 2.01", "9.01"]), '["2.01", "9.01"]')
 
 
 if __name__ == "__main__":

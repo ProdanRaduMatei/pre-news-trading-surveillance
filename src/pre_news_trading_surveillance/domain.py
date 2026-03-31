@@ -50,8 +50,12 @@ class CanonicalEvent:
     summary: str
     source_url: str
     primary_document: str | None
+    sec_items_json: str | None
     official_source_flag: bool
     timestamp_confidence: str
+    classifier_backend: str
+    sentiment_backend: str
+    novelty_backend: str
     source_quality: float
     novelty: float
     impact_score: float
@@ -74,7 +78,11 @@ class CanonicalEvent:
         str,
         str,
         str | None,
+        str | None,
         bool,
+        str,
+        str,
+        str,
         str,
         float,
         float,
@@ -96,8 +104,12 @@ class CanonicalEvent:
             self.summary,
             self.source_url,
             self.primary_document,
+            self.sec_items_json,
             self.official_source_flag,
             self.timestamp_confidence,
+            self.classifier_backend,
+            self.sentiment_backend,
+            self.novelty_backend,
             self.source_quality,
             self.novelty,
             self.impact_score,

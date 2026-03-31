@@ -19,6 +19,7 @@ def score_events_from_database(db_path, events: list[CanonicalEvent]) -> list[Ev
 
 def score_event_detail(detail: dict[str, object]) -> EventScore:
     sentiment_label = str(detail.get("sentiment_label", "neutral"))
+    sentiment_score = _as_float(detail.get("sentiment_score")) or 0.0
     pre_1d_return = _as_float(detail.get("pre_1d_return"))
     pre_5d_return = _as_float(detail.get("pre_5d_return"))
     volume_z_1d = _as_float(detail.get("volume_z_1d"))
@@ -26,6 +27,9 @@ def score_event_detail(detail: dict[str, object]) -> EventScore:
     novelty = _as_float(detail.get("novelty")) or 0.0
     impact_score = _as_float(detail.get("impact_score")) or 0.0
     source_quality = _as_float(detail.get("source_quality")) or 0.0
+    classifier_backend = str(detail.get("classifier_backend", "unknown"))
+    sentiment_backend = str(detail.get("sentiment_backend", "unknown"))
+    novelty_backend = str(detail.get("novelty_backend", "unknown"))
 
     directional_signal = max(pre_1d_return or 0.0, pre_5d_return or 0.0)
     if sentiment_label == "negative":
@@ -33,7 +37,8 @@ def score_event_detail(detail: dict[str, object]) -> EventScore:
     if sentiment_label == "neutral":
         directional_signal = max(abs(pre_1d_return or 0.0), abs(pre_5d_return or 0.0)) * 0.6
 
-    alignment_component = _clip01(directional_signal / 0.08)
+    sentiment_strength = 0.25 + min(0.75, abs(sentiment_score))
+    alignment_component = _clip01((directional_signal * sentiment_strength) / 0.08)
     volume_component = _clip01(max(volume_z_1d or 0.0, volume_z_5d or 0.0) / 4.0)
 
     rule_score = (
@@ -61,6 +66,10 @@ def score_event_detail(detail: dict[str, object]) -> EventScore:
             volume_z_5d=volume_z_5d,
             impact_score=impact_score,
             novelty=novelty,
+            sentiment_score=sentiment_score,
+            classifier_backend=classifier_backend,
+            sentiment_backend=sentiment_backend,
+            novelty_backend=novelty_backend,
         ),
         "components": {
             "alignment_component": round(alignment_component, 4),
@@ -75,6 +84,10 @@ def score_event_detail(detail: dict[str, object]) -> EventScore:
             "volume_z_1d": volume_z_1d,
             "volume_z_5d": volume_z_5d,
             "sentiment_label": sentiment_label,
+            "sentiment_score": sentiment_score,
+            "classifier_backend": classifier_backend,
+            "sentiment_backend": sentiment_backend,
+            "novelty_backend": novelty_backend,
         },
     }
 
@@ -97,6 +110,10 @@ def _build_summary(
     volume_z_5d: float | None,
     impact_score: float,
     novelty: float,
+    sentiment_score: float,
+    classifier_backend: str,
+    sentiment_backend: str,
+    novelty_backend: str,
 ) -> str:
     pieces = []
     if pre_1d_return is not None:
@@ -108,8 +125,12 @@ def _build_summary(
     elif volume_z_5d is not None:
         pieces.append(f"5D volume z-score was {volume_z_5d:.2f}")
     pieces.append(f"event sentiment was {sentiment_label}")
+    pieces.append(f"sentiment score was {sentiment_score:.2f}")
     pieces.append(f"impact prior was {impact_score:.2f}")
     pieces.append(f"novelty was {novelty:.2f}")
+    pieces.append(
+        f"classification used {classifier_backend}, sentiment used {sentiment_backend}, and novelty used {novelty_backend}"
+    )
     return "Flagged because " + ", ".join(pieces) + "."
 
 

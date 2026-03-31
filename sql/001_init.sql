@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS raw_filings (
   form_type TEXT NOT NULL,
   filing_date DATE,
   accepted_at TIMESTAMP,
+  items_json TEXT,
   primary_document TEXT,
   primary_doc_description TEXT,
   source_url TEXT NOT NULL,

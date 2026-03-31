@@ -33,6 +33,7 @@ Normalized SEC submission rows derived from issuer submission payloads.
 - `form_type`
 - `filing_date`
 - `accepted_at`
+- `items_json`
 - `primary_document`
 - `primary_doc_description`
 - `source_url`
@@ -60,6 +61,10 @@ Planned canonical event table.
 - `issuer_name`
 - `first_public_at`
 - `event_type`
+- `classifier_backend`
+- `sentiment_backend`
+- `novelty_backend`
+- `sec_items_json`
 - `timestamp_confidence`
 - `official_source_flag`
 - `title`

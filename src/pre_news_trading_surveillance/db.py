@@ -87,13 +87,14 @@ def upsert_raw_filings(db_path: Path, filings: list[RawFilingRecord]) -> int:
               form_type,
               filing_date,
               accepted_at,
+              items_json,
               primary_document,
               primary_doc_description,
               source_url,
               raw_path,
               ingested_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [filing.as_db_row() for filing in filings],
         )
@@ -174,14 +175,18 @@ def upsert_events(db_path: Path, events: list[CanonicalEvent]) -> int:
               summary,
               source_url,
               primary_document,
+              sec_items_json,
               official_source_flag,
               timestamp_confidence,
+              classifier_backend,
+              sentiment_backend,
+              novelty_backend,
               source_quality,
               novelty,
               impact_score,
               built_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [event.as_db_row() for event in events],
         )
@@ -288,6 +293,7 @@ def load_raw_filings(
           form_type,
           CAST(filing_date AS VARCHAR) AS filing_date,
           CAST(accepted_at AS VARCHAR) AS accepted_at,
+          items_json,
           primary_document,
           primary_doc_description,
           source_url,
@@ -322,11 +328,12 @@ def load_raw_filings(
             form_type=row[5],
             filing_date=row[6],
             accepted_at=row[7],
-            primary_document=row[8],
-            primary_doc_description=row[9],
-            source_url=row[10],
-            raw_path=row[11],
-            ingested_at=row[12],
+            items_json=row[8],
+            primary_document=row[9],
+            primary_doc_description=row[10],
+            source_url=row[11],
+            raw_path=row[12],
+            ingested_at=row[13],
         )
         for row in rows
     ]
@@ -355,8 +362,12 @@ def load_events(
           summary,
           source_url,
           primary_document,
+          sec_items_json,
           official_source_flag,
           timestamp_confidence,
+          classifier_backend,
+          sentiment_backend,
+          novelty_backend,
           source_quality,
           novelty,
           impact_score,
@@ -398,12 +409,16 @@ def load_events(
             summary=row[11],
             source_url=row[12],
             primary_document=row[13],
-            official_source_flag=bool(row[14]),
-            timestamp_confidence=row[15],
-            source_quality=float(row[16]),
-            novelty=float(row[17]),
-            impact_score=float(row[18]),
-            built_at=row[19],
+            sec_items_json=row[14],
+            official_source_flag=bool(row[15]),
+            timestamp_confidence=row[16],
+            classifier_backend=row[17],
+            sentiment_backend=row[18],
+            novelty_backend=row[19],
+            source_quality=float(row[20]),
+            novelty=float(row[21]),
+            impact_score=float(row[22]),
+            built_at=row[23],
         )
         for row in rows
     ]
@@ -475,6 +490,9 @@ def list_ranked_events(
           e.summary,
           e.source_url,
           e.timestamp_confidence,
+          e.classifier_backend,
+          e.sentiment_backend,
+          e.novelty_backend,
           e.novelty,
           e.impact_score,
           f.pre_1d_return,
@@ -531,8 +549,12 @@ def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
           e.summary,
           e.source_url,
           e.primary_document,
+          e.sec_items_json,
           e.official_source_flag,
           e.timestamp_confidence,
+          e.classifier_backend,
+          e.sentiment_backend,
+          e.novelty_backend,
           e.source_quality,
           e.novelty,
           e.impact_score,

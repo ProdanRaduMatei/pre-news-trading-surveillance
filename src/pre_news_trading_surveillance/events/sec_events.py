@@ -1,43 +1,15 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
 from ..domain import CanonicalEvent
 from ..ingest.models import RawFilingRecord
+from ..nlp.novelty import build_novelty_backend
+from ..nlp.sec_taxonomy import build_event_text, classify_event_type, parse_sec_items
+from ..nlp.sentiment import build_sentiment_backend
 
-
-EVENT_TYPE_RULES = (
-    ("mna", ("acquisition", "merger", "combination", "purchase agreement")),
-    ("guidance", ("guidance", "outlook", "forecast")),
-    ("earnings", ("results of operations", "earnings", "financial condition", "quarterly results")),
-    ("executive_change", ("departure of directors", "appointment", "resignation", "chief executive", "officer")),
-    ("financing", ("equity securities", "debt", "financing", "credit agreement", "offering")),
-    ("litigation_regulatory", ("lawsuit", "litigation", "subpoena", "investigation", "delisting", "regulatory")),
-    ("major_business_event", ("material definitive agreement", "partnership", "approval", "contract", "launch")),
-)
-
-POSITIVE_KEYWORDS = (
-    "acquisition",
-    "approval",
-    "agreement",
-    "partnership",
-    "results of operations",
-    "contract",
-    "launch",
-    "dividend",
-)
-NEGATIVE_KEYWORDS = (
-    "litigation",
-    "investigation",
-    "delisting",
-    "resignation",
-    "departure",
-    "impairment",
-    "bankruptcy",
-    "guidance cut",
-    "restatement",
-)
 
 IMPACT_SCORES = {
     "mna": 0.95,
@@ -51,27 +23,56 @@ IMPACT_SCORES = {
 }
 
 
-def build_canonical_events_from_filings(filings: list[RawFilingRecord]) -> list[CanonicalEvent]:
+def build_canonical_events_from_filings(
+    filings: list[RawFilingRecord],
+    sentiment_backend_name: str = "heuristic",
+    novelty_backend_name: str = "lexical",
+    sentiment_model: str | None = None,
+    novelty_model: str | None = None,
+) -> list[CanonicalEvent]:
     filings_sorted = sorted(filings, key=lambda filing: _event_datetime(filing))
-    recent_events: dict[tuple[str, str], list[datetime]] = defaultdict(list)
+    recent_events: dict[str, list[tuple[datetime, str]]] = defaultdict(list)
     built_at = _utc_now()
     events: list[CanonicalEvent] = []
+    sentiment_backend = build_sentiment_backend(sentiment_backend_name, sentiment_model)
+    novelty_backend = build_novelty_backend(novelty_backend_name, novelty_model)
 
     for filing in filings_sorted:
         event_dt = _event_datetime(filing)
-        event_type = classify_event_type(filing.form_type, filing.primary_doc_description, filing.primary_document)
-        sentiment_label, sentiment_score = infer_sentiment(
+        sec_items = parse_sec_items(filing.items_json)
+        event_type_result = classify_event_type(
+            filing.form_type,
             filing.primary_doc_description,
             filing.primary_document,
-            event_type,
+            sec_items,
         )
-        novelty = infer_novelty(recent_events[(filing.ticker, event_type)], event_dt)
-        recent_events[(filing.ticker, event_type)].append(event_dt)
+        sentiment_result = sentiment_backend.analyze(
+            filing.form_type,
+            filing.primary_doc_description,
+            filing.primary_document,
+            event_type_result.label,
+            filing.items_json,
+        )
+        event_text = build_event_text(
+            filing.form_type,
+            filing.primary_doc_description,
+            filing.primary_document,
+        )
+        novelty_history = [
+            prior_text
+            for prior_dt, prior_text in recent_events[filing.ticker]
+            if event_dt - prior_dt <= timedelta(days=30)
+        ]
+        novelty_result = novelty_backend.score(event_text, novelty_history)
+        recent_events[filing.ticker].append((event_dt, event_text))
 
         summary = (
-            f"{filing.company_name} disclosed a {filing.form_type} filing categorized as {event_type}. "
+            f"{filing.company_name} disclosed a {filing.form_type} filing categorized as "
+            f"{event_type_result.label} using {event_type_result.backend}. "
             f"Primary document description: {filing.primary_doc_description or 'not provided'}."
         )
+        if sec_items:
+            summary += f" SEC items: {', '.join(sec_items)}."
 
         first_public_at = event_dt.replace(tzinfo=timezone.utc).isoformat()
         events.append(
@@ -83,76 +84,27 @@ def build_canonical_events_from_filings(filings: list[RawFilingRecord]) -> list[
                 issuer_name=filing.company_name,
                 first_public_at=first_public_at,
                 event_date=event_dt.date().isoformat(),
-                event_type=event_type,
-                sentiment_label=sentiment_label,
-                sentiment_score=sentiment_score,
+                event_type=event_type_result.label,
+                sentiment_label=sentiment_result.label,
+                sentiment_score=sentiment_result.score,
                 title=filing.primary_doc_description or f"{filing.form_type} filing",
                 summary=summary,
                 source_url=filing.source_url,
                 primary_document=filing.primary_document,
+                sec_items_json=json.dumps(sec_items) if sec_items else None,
                 official_source_flag=True,
                 timestamp_confidence="high" if filing.accepted_at else "medium",
+                classifier_backend=event_type_result.backend,
+                sentiment_backend=sentiment_result.backend,
+                novelty_backend=novelty_result.backend,
                 source_quality=1.0,
-                novelty=novelty,
-                impact_score=IMPACT_SCORES.get(event_type, IMPACT_SCORES["other"]),
+                novelty=novelty_result.score,
+                impact_score=IMPACT_SCORES.get(event_type_result.label, IMPACT_SCORES["other"]),
                 built_at=built_at,
             )
         )
 
     return sorted(events, key=lambda event: event.first_public_at, reverse=True)
-
-
-def classify_event_type(
-    form_type: str,
-    primary_doc_description: str | None,
-    primary_document: str | None,
-) -> str:
-    text = " ".join(
-        [
-            form_type or "",
-            primary_doc_description or "",
-            primary_document or "",
-        ]
-    ).lower()
-
-    for event_type, keywords in EVENT_TYPE_RULES:
-        if any(keyword in text for keyword in keywords):
-            return event_type
-    if form_type.upper() == "8-K":
-        return "major_business_event"
-    return "other"
-
-
-def infer_sentiment(
-    primary_doc_description: str | None,
-    primary_document: str | None,
-    event_type: str,
-) -> tuple[str, float]:
-    text = " ".join([primary_doc_description or "", primary_document or "", event_type]).lower()
-
-    if any(keyword in text for keyword in NEGATIVE_KEYWORDS):
-        return "negative", -0.75
-    if any(keyword in text for keyword in POSITIVE_KEYWORDS):
-        return "positive", 0.75
-    if event_type in {"earnings", "guidance", "mna"}:
-        return "positive", 0.25
-    return "neutral", 0.0
-
-
-def infer_novelty(prior_event_times: list[datetime], event_dt: datetime) -> float:
-    if not prior_event_times:
-        return 1.0
-
-    recent_count = 0
-    for prior_time in prior_event_times:
-        if event_dt - prior_time <= timedelta(days=30):
-            recent_count += 1
-
-    if recent_count == 0:
-        return 0.9
-    if recent_count == 1:
-        return 0.55
-    return 0.3
 
 
 def _event_datetime(filing: RawFilingRecord) -> datetime:

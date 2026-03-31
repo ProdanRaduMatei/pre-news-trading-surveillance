@@ -52,6 +52,12 @@ source .venv/bin/activate
 pip install -e .
 ```
 
+For optional fully local NLP backends such as FinBERT sentiment and embedding-based novelty:
+
+```bash
+pip install -e .[nlp]
+```
+
 Initialize the local database and directory structure:
 
 ```bash
@@ -87,6 +93,17 @@ pnts compute-daily-features
 pnts score-events
 ```
 
+If you already have local models on disk, you can switch the SEC event builder to richer on-device NLP backends:
+
+```bash
+pnts build-sec-events \
+  --forms 8-K 6-K \
+  --sentiment-backend finbert \
+  --sentiment-model /absolute/path/to/finbert \
+  --novelty-backend sentence-transformers \
+  --novelty-model /absolute/path/to/all-MiniLM-L6-v2
+```
+
 Run the local API:
 
 ```bash
@@ -99,7 +116,7 @@ pnts serve-api --host 127.0.0.1 --port 8000
 - `pnts ingest-sec-reference --user-agent "..."`
 - `pnts ingest-sec-filings --user-agent "..." --tickers AAPL MSFT`
 - `pnts ingest-market-daily --csv /path/to/file.csv`
-- `pnts build-sec-events`
+- `pnts build-sec-events --sentiment-backend heuristic|finbert --novelty-backend lexical|sentence-transformers`
 - `pnts compute-daily-features`
 - `pnts score-events`
 - `pnts serve-api`
@@ -113,11 +130,6 @@ pnts serve-api --host 127.0.0.1 --port 8000
 - [DEPLOYMENT.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/DEPLOYMENT.md)
 - [RISK_AND_LIMITATIONS.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/RISK_AND_LIMITATIONS.md)
 
-## Notes on GitHub
+## GitHub
 
-This folder currently lives inside a larger workspace repository rooted at [AIFinanceAssistent](/Users/matei/AIFinanceAssistent). The contents here are structured so they can be promoted into a standalone GitHub repository cleanly, but creating that standalone remote needs one product decision first:
-
-- keep this as a subproject in the existing repository
-- or split this folder into its own dedicated repository
-
-The project files are now laid out to support the second option without additional restructuring.
+The standalone repository is published at [github.com/ProdanRaduMatei/pre-news-trading-surveillance](https://github.com/ProdanRaduMatei/pre-news-trading-surveillance).

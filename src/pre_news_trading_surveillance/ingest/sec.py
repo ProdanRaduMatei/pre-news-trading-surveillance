@@ -84,6 +84,7 @@ def parse_recent_filings(
         form_type = _safe_get(filings, "form", index) or "UNKNOWN"
         filing_date = _safe_get(filings, "filingDate", index)
         accepted_at = normalize_acceptance_datetime(_safe_get(filings, "acceptanceDateTime", index))
+        items_json = normalize_items_json(_safe_get(filings, "items", index))
         primary_document = _safe_get(filings, "primaryDocument", index)
         primary_doc_description = _safe_get(filings, "primaryDocDescription", index)
 
@@ -104,6 +105,7 @@ def parse_recent_filings(
                 form_type=str(form_type),
                 filing_date=filing_date,
                 accepted_at=accepted_at,
+                items_json=items_json,
                 primary_document=primary_document,
                 primary_doc_description=primary_doc_description,
                 source_url=source_url,
@@ -131,6 +133,26 @@ def normalize_acceptance_datetime(value: str | None) -> str | None:
         except ValueError:
             continue
     return text
+
+
+def normalize_items_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        items = [_normalize_item_token(item) for item in value if str(item).strip()]
+        return json.dumps(items) if items else None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    separators = [",", ";", "|"]
+    normalized = text
+    for separator in separators:
+        normalized = normalized.replace(separator, " ")
+    items = [_normalize_item_token(token) for token in normalized.split() if token.strip()]
+    unique_items = list(dict.fromkeys(items))
+    return json.dumps(unique_items) if unique_items else None
 
 
 def load_or_fetch_reference_map(paths, user_agent: str, refresh: bool = False) -> dict[str, TickerReference]:
@@ -190,3 +212,10 @@ def _safe_get(values_by_key: dict[str, list[Any]], key: str, index: int) -> Any:
     if index >= len(values):
         return None
     return values[index]
+
+
+def _normalize_item_token(value: Any) -> str:
+    text = str(value).strip()
+    if not text:
+        return text
+    return text.replace("Item", "").replace("item", "").strip()

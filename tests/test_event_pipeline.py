@@ -10,23 +10,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pre_news_trading_surveillance import db  # noqa: E402
 from pre_news_trading_surveillance.domain import MarketBarDaily  # noqa: E402
-from pre_news_trading_surveillance.events.sec_events import (  # noqa: E402
-    build_canonical_events_from_filings,
-    classify_event_type,
-)
+from pre_news_trading_surveillance.events.sec_events import build_canonical_events_from_filings  # noqa: E402
 from pre_news_trading_surveillance.features.daily import compute_event_market_features  # noqa: E402
 from pre_news_trading_surveillance.ingest.models import RawFilingRecord  # noqa: E402
+from pre_news_trading_surveillance.nlp.novelty import LexicalNoveltyBackend  # noqa: E402
+from pre_news_trading_surveillance.nlp.sec_taxonomy import classify_event_type  # noqa: E402
 from pre_news_trading_surveillance.scoring.rules import score_event_detail  # noqa: E402
 
 
 class EventPipelineTests(unittest.TestCase):
-    def test_classify_event_type_prefers_mna_keywords(self) -> None:
+    def test_classify_event_type_prefers_sec_items_and_keywords(self) -> None:
         event_type = classify_event_type(
             form_type="8-K",
             primary_doc_description="Completion of Acquisition",
             primary_document="acquisition.htm",
+            sec_items=["2.01", "9.01"],
         )
-        self.assertEqual(event_type, "mna")
+        self.assertEqual(event_type.label, "mna")
+        self.assertEqual(event_type.backend, "sec_item_keyword_rules")
+
+    def test_lexical_novelty_drops_for_similar_text(self) -> None:
+        backend = LexicalNoveltyBackend()
+        result = backend.score(
+            "Completion of acquisition and merger agreement",
+            ["Completion of acquisition and merger agreement", "Quarterly dividend declared"],
+        )
+        self.assertLess(result.score, 0.2)
 
     def test_build_features_and_score(self) -> None:
         filing = RawFilingRecord(
@@ -38,6 +47,7 @@ class EventPipelineTests(unittest.TestCase):
             form_type="8-K",
             filing_date="2024-01-15",
             accepted_at="2024-01-15T13:30:00+00:00",
+            items_json='["2.01", "9.01"]',
             primary_document="deal.htm",
             primary_doc_description="Completion of Acquisition",
             source_url="https://example.com/deal.htm",
@@ -47,6 +57,9 @@ class EventPipelineTests(unittest.TestCase):
         events = build_canonical_events_from_filings([filing])
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].event_type, "mna")
+        self.assertEqual(events[0].classifier_backend, "sec_item_keyword_rules")
+        self.assertEqual(events[0].sentiment_backend, "heuristic")
+        self.assertEqual(events[0].novelty_backend, "lexical")
 
         bars = [
             MarketBarDaily(
@@ -80,6 +93,7 @@ class EventPipelineTests(unittest.TestCase):
             score = score_event_detail(detail or {})
             payload = json.loads(score.explanation_payload)
             self.assertIn("summary", payload)
+            self.assertIn("classifier_backend", payload["signals"])
             self.assertGreaterEqual(score.suspiciousness_score, 0.0)
 
 

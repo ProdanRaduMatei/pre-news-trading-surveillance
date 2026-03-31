@@ -34,6 +34,7 @@ class RawFilingRecord:
     form_type: str
     filing_date: str | None
     accepted_at: str | None
+    items_json: str | None
     primary_document: str | None
     primary_doc_description: str | None
     source_url: str
@@ -53,6 +54,7 @@ class RawFilingRecord:
         str | None,
         str | None,
         str | None,
+        str | None,
         str,
         str,
         str,
@@ -66,6 +68,7 @@ class RawFilingRecord:
             self.form_type,
             self.filing_date,
             self.accepted_at,
+            self.items_json,
             self.primary_document,
             self.primary_doc_description,
             self.source_url,
