@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pre-news-trading-surveillance"
+version = "0.1.0"
+description = "Research platform for unusual pre-disclosure market activity."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "certifi>=2024.0.0",
+  "duckdb>=1.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+]
+
+[project.scripts]
+pnts = "pre_news_trading_surveillance.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

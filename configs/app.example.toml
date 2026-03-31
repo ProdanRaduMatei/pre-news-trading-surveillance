@@ -1,0 +1,21 @@
+[project]
+name = "pre-news-trading-surveillance"
+timezone = "UTC"
+
+[data]
+raw_dir = "data/raw"
+bronze_dir = "data/bronze"
+silver_dir = "data/silver"
+gold_dir = "data/gold"
+db_path = "data/gold/pnts.duckdb"
+
+[universe]
+tickers = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL"]
+
+[sec]
+reference_url = "https://www.sec.gov/files/company_tickers.json"
+submissions_base_url = "https://data.sec.gov/submissions"
+
+[serving]
+public_delay_mode = "T+1"
+score_bands = ["Low", "Medium", "High"]
