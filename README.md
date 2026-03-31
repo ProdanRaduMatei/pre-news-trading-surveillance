@@ -120,6 +120,12 @@ export ALPHAVANTAGE_API_KEY="your-key"
 pnts refresh-pipeline --config configs/refresh_pipeline.example.toml --mode full
 ```
 
+Build and optionally upload a public snapshot bundle directly:
+
+```bash
+pnts publish-snapshot --events-limit 250 --output-dir data/publish/current
+```
+
 If you already have local models on disk, you can switch the SEC event builder to richer on-device NLP backends:
 
 ```bash
@@ -152,6 +158,7 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - `pnts compute-daily-features`
 - `pnts compute-minute-features`
 - `pnts score-events`
+- `pnts publish-snapshot --output-dir data/publish/current`
 - `pnts refresh-pipeline --config configs/refresh_pipeline.example.toml --mode full|intraday`
 - `pnts serve-api`
 
@@ -181,6 +188,18 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - Default schedules:
   - weekday hourly intraday refresh at `15` minutes past the hour UTC
   - weekday full refresh at `22:25 UTC`
+
+## Published Snapshot Mode
+
+- The pipeline now produces a public JSON bundle under `data/publish/current`.
+- Set `PNTS_API_DATA_SOURCE=published` to make the FastAPI app serve from the published bundle instead of DuckDB.
+- Override the bundle location with `PNTS_PUBLISHED_DATA_DIR=/absolute/path/to/published/bundle`.
+- Optional object-storage upload is supported through S3-compatible settings in the refresh config and GitHub secrets such as:
+  - `PUBLISH_S3_BUCKET`
+  - `PUBLISH_S3_REGION`
+  - `PUBLISH_S3_ENDPOINT_URL`
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
 
 ## Core Docs
 

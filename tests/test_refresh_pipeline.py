@@ -45,6 +45,13 @@ extended_hours = false
 [nlp]
 sentiment_backend = "finbert"
 novelty_backend = "lexical"
+
+[publish]
+enabled = true
+output_dir = "data/publish/current"
+max_events = 75
+s3_enabled = false
+s3_bucket_env = "TEST_PUBLISH_BUCKET"
                 """.strip(),
                 encoding="utf-8",
             )
@@ -61,6 +68,10 @@ novelty_backend = "lexical"
         self.assertFalse(config.market_minute.enabled)
         self.assertEqual(config.market_minute.interval, "5min")
         self.assertEqual(config.nlp.sentiment_backend, "finbert")
+        self.assertTrue(config.publish.enabled)
+        self.assertEqual(config.publish.output_dir, "data/publish/current")
+        self.assertEqual(config.publish.max_events, 75)
+        self.assertEqual(config.publish.s3_bucket_env, "TEST_PUBLISH_BUCKET")
 
     def test_resolve_refresh_steps_supports_modes_and_explicit_override(self) -> None:
         self.assertEqual(refresh.resolve_refresh_steps("intraday"), refresh.INTRADAY_REFRESH_STEPS)
@@ -106,6 +117,22 @@ novelty_backend = "lexical"
                     sentiment_model=None,
                     novelty_backend="lexical",
                     novelty_model=None,
+                ),
+                publish=refresh.PublishRefreshConfig(
+                    enabled=True,
+                    output_dir="data/publish/current",
+                    max_events=25,
+                    s3_enabled=False,
+                    s3_bucket=None,
+                    s3_bucket_env="PUBLISH_S3_BUCKET",
+                    s3_prefix="current",
+                    s3_region=None,
+                    s3_region_env="PUBLISH_S3_REGION",
+                    s3_endpoint_url=None,
+                    s3_endpoint_url_env="PUBLISH_S3_ENDPOINT_URL",
+                    s3_access_key_env="AWS_ACCESS_KEY_ID",
+                    s3_secret_key_env="AWS_SECRET_ACCESS_KEY",
+                    s3_session_token_env="AWS_SESSION_TOKEN",
                 ),
             )
 
@@ -154,7 +181,8 @@ novelty_backend = "lexical"
             )
 
             self.assertEqual(completed, refresh.FULL_REFRESH_STEPS)
-            self.assertEqual(cli_module.calls, refresh.FULL_REFRESH_STEPS)
+            self.assertEqual(cli_module.calls, refresh.FULL_REFRESH_STEPS[:-1])
+            self.assertTrue((paths.publish_dir / "current" / "manifest.json").exists())
 
             duckdb = db._require_duckdb()
             connection = duckdb.connect(str(paths.db_path))

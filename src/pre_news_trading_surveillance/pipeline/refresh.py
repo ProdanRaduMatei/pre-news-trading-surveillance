@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Callable
 
 from .. import db
+from ..publish import snapshot
+from ..publish import storage as publish_storage
 
 RefreshStep = str
 FULL_REFRESH_STEPS: list[RefreshStep] = [
@@ -19,6 +21,7 @@ FULL_REFRESH_STEPS: list[RefreshStep] = [
     "compute_daily",
     "compute_minute",
     "score",
+    "publish",
 ]
 INTRADAY_REFRESH_STEPS: list[RefreshStep] = [
     "sec_filings",
@@ -26,6 +29,7 @@ INTRADAY_REFRESH_STEPS: list[RefreshStep] = [
     "build_events",
     "compute_minute",
     "score",
+    "publish",
 ]
 VALID_REFRESH_STEPS = set(FULL_REFRESH_STEPS)
 
@@ -73,6 +77,24 @@ class NlpRefreshConfig:
 
 
 @dataclass(frozen=True)
+class PublishRefreshConfig:
+    enabled: bool
+    output_dir: str
+    max_events: int
+    s3_enabled: bool
+    s3_bucket: str | None
+    s3_bucket_env: str
+    s3_prefix: str
+    s3_region: str | None
+    s3_region_env: str
+    s3_endpoint_url: str | None
+    s3_endpoint_url_env: str
+    s3_access_key_env: str
+    s3_secret_key_env: str
+    s3_session_token_env: str
+
+
+@dataclass(frozen=True)
 class RefreshPipelineConfig:
     tickers: list[str]
     sec: SecRefreshConfig
@@ -80,6 +102,7 @@ class RefreshPipelineConfig:
     market_daily: MarketDailyRefreshConfig
     market_minute: MarketMinuteRefreshConfig
     nlp: NlpRefreshConfig
+    publish: PublishRefreshConfig
 
 
 def load_refresh_config(config_path: Path) -> RefreshPipelineConfig:
@@ -94,6 +117,7 @@ def load_refresh_config(config_path: Path) -> RefreshPipelineConfig:
     market_daily_payload = market_payload.get("daily", {})
     market_minute_payload = market_payload.get("minute", {})
     nlp_payload = payload.get("nlp", {})
+    publish_payload = payload.get("publish", {})
 
     return RefreshPipelineConfig(
         tickers=tickers,
@@ -128,6 +152,24 @@ def load_refresh_config(config_path: Path) -> RefreshPipelineConfig:
             sentiment_model=_none_if_blank(nlp_payload.get("sentiment_model")),
             novelty_backend=str(nlp_payload.get("novelty_backend", "lexical")),
             novelty_model=_none_if_blank(nlp_payload.get("novelty_model")),
+        ),
+        publish=PublishRefreshConfig(
+            enabled=bool(publish_payload.get("enabled", True)),
+            output_dir=str(publish_payload.get("output_dir", "data/publish/current")),
+            max_events=int(publish_payload.get("max_events", 250)),
+            s3_enabled=bool(publish_payload.get("s3_enabled", False)),
+            s3_bucket=_none_if_blank(publish_payload.get("s3_bucket")),
+            s3_bucket_env=str(publish_payload.get("s3_bucket_env", "PUBLISH_S3_BUCKET")),
+            s3_prefix=str(publish_payload.get("s3_prefix", "current")),
+            s3_region=_none_if_blank(publish_payload.get("s3_region")),
+            s3_region_env=str(publish_payload.get("s3_region_env", "PUBLISH_S3_REGION")),
+            s3_endpoint_url=_none_if_blank(publish_payload.get("s3_endpoint_url")),
+            s3_endpoint_url_env=str(
+                publish_payload.get("s3_endpoint_url_env", "PUBLISH_S3_ENDPOINT_URL")
+            ),
+            s3_access_key_env=str(publish_payload.get("s3_access_key_env", "AWS_ACCESS_KEY_ID")),
+            s3_secret_key_env=str(publish_payload.get("s3_secret_key_env", "AWS_SECRET_ACCESS_KEY")),
+            s3_session_token_env=str(publish_payload.get("s3_session_token_env", "AWS_SESSION_TOKEN")),
         ),
     )
 
@@ -243,6 +285,52 @@ def run_refresh_pipeline(
                     cli_module.cmd_score_events,
                     Namespace(ticker=None),
                 )
+            elif step == "publish":
+                if not config.publish.enabled:
+                    continue
+                output_dir = _resolve_publish_output_dir(config.publish.output_dir, paths.root)
+                bundle = snapshot.build_snapshot_bundle(
+                    db_path=paths.db_path,
+                    events_limit=config.publish.max_events,
+                )
+                snapshot.write_snapshot_bundle(bundle, output_dir)
+
+                upload_keys: list[str] = []
+                if config.publish.s3_enabled:
+                    bucket = _require_publish_bucket(
+                        _resolve_optional_value(config.publish.s3_bucket, config.publish.s3_bucket_env)
+                    )
+                    upload_keys = publish_storage.upload_directory_to_s3(
+                        source_dir=output_dir,
+                        bucket=bucket,
+                        prefix=config.publish.s3_prefix,
+                        region=_resolve_optional_value(
+                            config.publish.s3_region,
+                            config.publish.s3_region_env,
+                        ),
+                        endpoint_url=_resolve_optional_value(
+                            config.publish.s3_endpoint_url,
+                            config.publish.s3_endpoint_url_env,
+                        ),
+                        access_key=publish_storage.resolve_optional_env(config.publish.s3_access_key_env),
+                        secret_key=publish_storage.resolve_optional_env(config.publish.s3_secret_key_env),
+                        session_token=publish_storage.resolve_optional_env(config.publish.s3_session_token_env),
+                    )
+
+                db.record_ingestion_run(
+                    db_path=paths.db_path,
+                    pipeline_name="publish_snapshot",
+                    status="success",
+                    row_count=len(bundle.events),
+                    metadata={
+                        "output_dir": str(output_dir),
+                        "max_events": config.publish.max_events,
+                        "s3_enabled": config.publish.s3_enabled,
+                        "s3_bucket": config.publish.s3_bucket,
+                        "s3_prefix": config.publish.s3_prefix,
+                        "uploaded_keys": upload_keys[:10],
+                    },
+                )
             else:
                 raise ValueError(f"Unhandled refresh step: {step}")
             completed.append(step)
@@ -294,3 +382,25 @@ def _none_if_blank(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _resolve_publish_output_dir(output_dir: str, root: Path) -> Path:
+    path = Path(output_dir)
+    if path.is_absolute():
+        return path
+    return root / path
+
+
+def _require_publish_bucket(bucket: str | None) -> str:
+    if bucket:
+        return bucket
+    raise RuntimeError("S3 publication is enabled but `publish.s3_bucket` is not configured.")
+
+
+def _resolve_optional_value(explicit: str | None, env_name: str) -> str | None:
+    if explicit:
+        return explicit
+    env_value = os.getenv(env_name)
+    if env_value:
+        return env_value
+    return None

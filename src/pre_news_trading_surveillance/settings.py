@@ -17,6 +17,7 @@ class ProjectPaths:
     bronze_dir: Path
     silver_dir: Path
     gold_dir: Path
+    publish_dir: Path
     db_path: Path
 
     def ensure_directories(self) -> None:
@@ -31,6 +32,8 @@ class ProjectPaths:
             self.bronze_dir,
             self.silver_dir,
             self.gold_dir,
+            self.publish_dir,
+            self.publish_dir / "current",
             self.raw_dir / "sec",
             self.raw_dir / "sec" / "submissions",
             self.raw_dir / "market",
@@ -57,5 +60,6 @@ def default_paths(root: Path | None = None) -> ProjectPaths:
         bronze_dir=data_dir / "bronze",
         silver_dir=data_dir / "silver",
         gold_dir=data_dir / "gold",
+        publish_dir=data_dir / "publish",
         db_path=data_dir / "gold" / "pnts.duckdb",
     )

@@ -9,6 +9,8 @@ from .features import daily as daily_features
 from .features import minute as minute_features
 from .ingest import market, sec
 from .pipeline import refresh as refresh_pipeline
+from .publish import snapshot as publish_snapshot
+from .publish import storage as publish_storage
 from .scoring import rules
 from .settings import default_paths
 
@@ -241,6 +243,54 @@ def build_parser() -> argparse.ArgumentParser:
     score_events.add_argument(
         "--ticker",
         help="Optional single-ticker filter.",
+    )
+
+    publish_job = subparsers.add_parser(
+        "publish-snapshot",
+        help="Build a public JSON snapshot bundle from the scored DuckDB dataset.",
+    )
+    publish_job.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Output directory for the published bundle. Defaults to data/publish/current.",
+    )
+    publish_job.add_argument(
+        "--events-limit",
+        type=int,
+        default=250,
+        help="Maximum number of ranked events to include in the published bundle.",
+    )
+    publish_job.add_argument(
+        "--s3-bucket",
+        help="Optional S3-compatible bucket to upload the bundle to.",
+    )
+    publish_job.add_argument(
+        "--s3-prefix",
+        default="current",
+        help="Optional key prefix when uploading to S3-compatible storage.",
+    )
+    publish_job.add_argument(
+        "--s3-region",
+        help="Optional S3 region name.",
+    )
+    publish_job.add_argument(
+        "--s3-endpoint-url",
+        help="Optional custom endpoint URL for S3-compatible storage.",
+    )
+    publish_job.add_argument(
+        "--s3-access-key-env",
+        default="AWS_ACCESS_KEY_ID",
+        help="Environment variable for S3 access key.",
+    )
+    publish_job.add_argument(
+        "--s3-secret-key-env",
+        default="AWS_SECRET_ACCESS_KEY",
+        help="Environment variable for S3 secret key.",
+    )
+    publish_job.add_argument(
+        "--s3-session-token-env",
+        default="AWS_SESSION_TOKEN",
+        help="Environment variable for S3 session token.",
     )
 
     refresh_job = subparsers.add_parser(
@@ -598,6 +648,33 @@ def cmd_score_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_publish_snapshot(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    output_dir = args.output_dir or (paths.publish_dir / "current")
+    bundle = publish_snapshot.build_snapshot_bundle(
+        db_path=paths.db_path,
+        events_limit=args.events_limit,
+    )
+    publish_snapshot.write_snapshot_bundle(bundle, output_dir)
+    print(f"Published snapshot bundle with {len(bundle.events)} events to {output_dir}")
+
+    if args.s3_bucket:
+        uploaded = publish_storage.upload_directory_to_s3(
+            source_dir=output_dir,
+            bucket=args.s3_bucket,
+            prefix=args.s3_prefix,
+            region=args.s3_region,
+            endpoint_url=args.s3_endpoint_url,
+            access_key=publish_storage.resolve_optional_env(args.s3_access_key_env),
+            secret_key=publish_storage.resolve_optional_env(args.s3_secret_key_env),
+            session_token=publish_storage.resolve_optional_env(args.s3_session_token_env),
+        )
+        print(f"Uploaded {len(uploaded)} files to s3://{args.s3_bucket}/{args.s3_prefix}".rstrip("/"))
+    return 0
+
+
 def cmd_refresh_pipeline(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
@@ -664,6 +741,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compute_minute_features(args)
     if args.command == "score-events":
         return cmd_score_events(args)
+    if args.command == "publish-snapshot":
+        return cmd_publish_snapshot(args)
     if args.command == "refresh-pipeline":
         return cmd_refresh_pipeline(args)
     if args.command == "serve-api":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from pre_news_trading_surveillance.api import app as api_app  # noqa: E402
 from pre_news_trading_surveillance.events.sec_events import build_canonical_events_from_filings  # noqa: E402
 from pre_news_trading_surveillance.features.daily import compute_event_market_features  # noqa: E402
 from pre_news_trading_surveillance.ingest.models import RawFilingRecord  # noqa: E402
+from pre_news_trading_surveillance.publish import snapshot as publish_snapshot  # noqa: E402
 from pre_news_trading_surveillance.scoring.rules import score_event_detail  # noqa: E402
 from pre_news_trading_surveillance.settings import default_paths  # noqa: E402
 
@@ -54,6 +56,41 @@ class DashboardApiTests(unittest.TestCase):
             self.assertIn("summary", detail_payload["explanation_payload"])
             self.assertIn("built_at", detail_payload)
             self.assertIn("scored_at", detail_payload)
+
+    def test_summary_and_event_detail_can_serve_published_snapshot(self) -> None:
+        tempdir = tempfile.TemporaryDirectory()
+        root = Path(tempdir.name)
+        paths = default_paths(root=root)
+        paths.ensure_directories()
+
+        db.init_database(db_path=paths.db_path, schema_dir=Path(__file__).resolve().parents[1] / "sql")
+        self._seed_ranked_event(paths.db_path)
+        bundle = publish_snapshot.build_snapshot_bundle(db_path=paths.db_path, events_limit=25)
+        publish_snapshot.write_snapshot_bundle(bundle, paths.publish_dir / "current")
+
+        with patch("pre_news_trading_surveillance.api.app.default_paths", return_value=paths):
+            with patch.dict(
+                os.environ,
+                {
+                    "PNTS_API_DATA_SOURCE": "published",
+                    "PNTS_PUBLISHED_DATA_DIR": str(paths.publish_dir / "current"),
+                },
+                clear=False,
+            ):
+                with TestClient(api_app.app) as client:
+                    summary_response = client.get("/summary")
+                    self.assertEqual(summary_response.status_code, 200)
+                    self.assertEqual(summary_response.json()["overview"]["total_events"], 1)
+
+                    events_response = client.get("/events")
+                    self.assertEqual(events_response.status_code, 200)
+                    event_id = events_response.json()["items"][0]["event_id"]
+
+                    detail_response = client.get(f"/events/{event_id}")
+                    self.assertEqual(detail_response.status_code, 200)
+                    self.assertEqual(detail_response.json()["ticker"], "AAPL")
+
+        tempdir.cleanup()
 
     def _build_client(self) -> TestClient:
         tempdir = tempfile.TemporaryDirectory()

@@ -31,3 +31,19 @@ sentiment_backend = "heuristic"
 sentiment_model = ""
 novelty_backend = "lexical"
 novelty_model = ""
+
+[publish]
+enabled = true
+output_dir = "data/publish/current"
+max_events = 250
+s3_enabled = false
+s3_bucket = ""
+s3_bucket_env = "PUBLISH_S3_BUCKET"
+s3_prefix = "current"
+s3_region = ""
+s3_region_env = "PUBLISH_S3_REGION"
+s3_endpoint_url = ""
+s3_endpoint_url_env = "PUBLISH_S3_ENDPOINT_URL"
+s3_access_key_env = "AWS_ACCESS_KEY_ID"
+s3_secret_key_env = "AWS_SECRET_ACCESS_KEY"
+s3_session_token_env = "AWS_SESSION_TOKEN"

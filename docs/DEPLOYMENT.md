@@ -60,6 +60,8 @@ Scheduled refresh automation now lives in [.github/workflows/refresh.yml](/Users
 - weekday hourly intraday refresh
 - weekday full refresh
 - manual `workflow_dispatch` for either mode
+- published snapshot generation on every refresh run
+- optional S3-compatible upload for the published bundle
 
 For a standalone repository, extend it with:
 
@@ -81,7 +83,28 @@ The scheduled refresh workflow assumes:
 
 - `SEC_USER_AGENT` secret for SEC-compliant requests
 - `ALPHAVANTAGE_API_KEY` secret for market data pulls
+- optional publish secrets:
+  - `PUBLISH_S3_BUCKET`
+  - `PUBLISH_S3_REGION`
+  - `PUBLISH_S3_ENDPOINT_URL`
+  - `AWS_ACCESS_KEY_ID`
+  - `AWS_SECRET_ACCESS_KEY`
+  - `AWS_SESSION_TOKEN`
 - refresh config checked into the repo, with secrets injected through environment variables rather than hardcoded in config
+
+## Public Data Serving Modes
+
+The FastAPI app can now serve from two backends:
+
+- `duckdb` mode:
+  - reads directly from the local analytical DuckDB
+- `published` mode:
+  - reads from a curated snapshot bundle generated under `data/publish/current` or another mounted path
+
+Set the deployed app environment like this for published mode:
+
+- `PNTS_API_DATA_SOURCE=published`
+- `PNTS_PUBLISHED_DATA_DIR=/mounted/public/snapshot/path`
 
 ## Recommended Refresh Split
 
@@ -100,3 +123,4 @@ The scheduled refresh workflow assumes:
   - daily features
   - minute features
   - scores
+  - published snapshot
