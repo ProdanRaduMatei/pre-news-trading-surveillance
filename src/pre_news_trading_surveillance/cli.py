@@ -7,7 +7,7 @@ from . import db
 from .events import sec_events
 from .features import daily as daily_features
 from .features import minute as minute_features
-from .ingest import sec
+from .ingest import market, sec
 from .scoring import rules
 from .settings import default_paths
 
@@ -81,24 +81,109 @@ def build_parser() -> argparse.ArgumentParser:
 
     ingest_market_daily = subparsers.add_parser(
         "ingest-market-daily",
-        help="Load daily market bars from a CSV file into storage.",
+        help="Load daily market bars from a CSV file or provider into storage.",
     )
-    ingest_market_daily.add_argument("--csv", type=Path, required=True, help="CSV path.")
+    daily_source = ingest_market_daily.add_mutually_exclusive_group(required=True)
+    daily_source.add_argument("--csv", type=Path, help="CSV path.")
+    daily_source.add_argument(
+        "--provider",
+        choices=[market.ALPHA_VANTAGE_PROVIDER],
+        help="Remote market data provider.",
+    )
+    ingest_market_daily.add_argument(
+        "--tickers",
+        nargs="+",
+        help="Ticker symbols to fetch when using a provider.",
+    )
     ingest_market_daily.add_argument(
         "--source",
         default="csv_import",
         help="Source label stored with the imported bars.",
     )
+    ingest_market_daily.add_argument("--api-key", help="Explicit provider API key.")
+    ingest_market_daily.add_argument(
+        "--api-key-env",
+        default=market.ALPHA_VANTAGE_ENV_VAR,
+        help="Environment variable to read the provider API key from.",
+    )
+    ingest_market_daily.add_argument(
+        "--outputsize",
+        choices=["compact", "full"],
+        default="compact",
+        help="Provider output size.",
+    )
+    ingest_market_daily.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=30,
+        help="Provider request timeout in seconds.",
+    )
 
     ingest_market_minute = subparsers.add_parser(
         "ingest-market-minute",
-        help="Load minute market bars from a CSV file into storage.",
+        help="Load minute market bars from a CSV file or provider into storage.",
     )
-    ingest_market_minute.add_argument("--csv", type=Path, required=True, help="CSV path.")
+    minute_source = ingest_market_minute.add_mutually_exclusive_group(required=True)
+    minute_source.add_argument("--csv", type=Path, help="CSV path.")
+    minute_source.add_argument(
+        "--provider",
+        choices=[market.ALPHA_VANTAGE_PROVIDER],
+        help="Remote market data provider.",
+    )
+    ingest_market_minute.add_argument(
+        "--tickers",
+        nargs="+",
+        help="Ticker symbols to fetch when using a provider.",
+    )
     ingest_market_minute.add_argument(
         "--source",
         default="csv_import",
         help="Source label stored with the imported bars.",
+    )
+    ingest_market_minute.add_argument("--api-key", help="Explicit provider API key.")
+    ingest_market_minute.add_argument(
+        "--api-key-env",
+        default=market.ALPHA_VANTAGE_ENV_VAR,
+        help="Environment variable to read the provider API key from.",
+    )
+    ingest_market_minute.add_argument(
+        "--interval",
+        choices=["1min", "5min", "15min", "30min", "60min"],
+        default="1min",
+        help="Provider bar interval.",
+    )
+    ingest_market_minute.add_argument(
+        "--outputsize",
+        choices=["compact", "full"],
+        default="compact",
+        help="Provider output size.",
+    )
+    ingest_market_minute.add_argument(
+        "--month",
+        help="Optional provider month in YYYY-MM format for historical intraday pulls.",
+    )
+    ingest_market_minute.add_argument(
+        "--entitlement",
+        choices=["realtime", "delayed"],
+        help="Optional provider entitlement mode for intraday data.",
+    )
+    ingest_market_minute.add_argument(
+        "--adjusted",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Whether provider intraday bars should be split/dividend adjusted.",
+    )
+    ingest_market_minute.add_argument(
+        "--extended-hours",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether provider intraday bars should include extended hours.",
+    )
+    ingest_market_minute.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=30,
+        help="Provider request timeout in seconds.",
     )
 
     build_events = subparsers.add_parser(
@@ -266,34 +351,141 @@ def cmd_ingest_sec_filings(args: argparse.Namespace) -> int:
 def cmd_ingest_market_daily(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    bars = daily_features.load_market_bars_from_csv(args.csv, source=args.source)
     db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+
+    if args.csv:
+        bars = daily_features.load_market_bars_from_csv(args.csv, source=args.source)
+        inserted = db.upsert_market_bars_daily(paths.db_path, bars)
+        db.record_ingestion_run(
+            db_path=paths.db_path,
+            pipeline_name="market_bars_daily_csv",
+            status="success",
+            row_count=inserted,
+            metadata={"csv_path": str(args.csv), "source": args.source},
+        )
+        print(f"Stored {inserted} daily market bars from {args.csv}")
+        return 0
+
+    requested_tickers = _require_provider_tickers(args.tickers)
+    api_key = market.resolve_api_key(args.api_key, args.api_key_env)
+    bars = []
+    raw_paths: dict[str, str] = {}
+    for ticker in requested_tickers:
+        text = market.fetch_alpha_vantage_daily_csv(
+            ticker,
+            api_key,
+            outputsize=args.outputsize,
+            timeout_seconds=args.timeout_seconds,
+        )
+        raw_path = market.persist_raw_market_snapshot(
+            paths,
+            provider=args.provider,
+            granularity="daily",
+            ticker=ticker,
+            text=text,
+            descriptor=f"daily_{args.outputsize}",
+        )
+        raw_paths[ticker] = str(raw_path)
+        bars.extend(
+            market.parse_alpha_vantage_daily_csv(
+                text,
+                symbol=ticker,
+                source=f"{args.provider}_api",
+            )
+        )
+
     inserted = db.upsert_market_bars_daily(paths.db_path, bars)
     db.record_ingestion_run(
         db_path=paths.db_path,
-        pipeline_name="market_bars_daily_csv",
+        pipeline_name="market_bars_daily_provider",
         status="success",
         row_count=inserted,
-        metadata={"csv_path": str(args.csv), "source": args.source},
+        metadata={
+            "provider": args.provider,
+            "tickers": requested_tickers,
+            "outputsize": args.outputsize,
+            "raw_paths": raw_paths,
+        },
     )
-    print(f"Stored {inserted} daily market bars from {args.csv}")
+    print(f"Stored {inserted} daily market bars from provider {args.provider}")
     return 0
 
 
 def cmd_ingest_market_minute(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    bars = minute_features.load_market_bars_from_csv(args.csv, source=args.source)
     db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+
+    if args.csv:
+        bars = minute_features.load_market_bars_from_csv(args.csv, source=args.source)
+        inserted = db.upsert_market_bars_minute(paths.db_path, bars)
+        db.record_ingestion_run(
+            db_path=paths.db_path,
+            pipeline_name="market_bars_minute_csv",
+            status="success",
+            row_count=inserted,
+            metadata={"csv_path": str(args.csv), "source": args.source},
+        )
+        print(f"Stored {inserted} minute market bars from {args.csv}")
+        return 0
+
+    requested_tickers = _require_provider_tickers(args.tickers)
+    api_key = market.resolve_api_key(args.api_key, args.api_key_env)
+    bars = []
+    raw_paths: dict[str, str] = {}
+    for ticker in requested_tickers:
+        text = market.fetch_alpha_vantage_intraday_csv(
+            ticker,
+            api_key,
+            interval=args.interval,
+            adjusted=args.adjusted,
+            extended_hours=args.extended_hours,
+            outputsize=args.outputsize,
+            month=args.month,
+            entitlement=args.entitlement,
+            timeout_seconds=args.timeout_seconds,
+        )
+        descriptor_parts = [f"intraday_{args.interval}", args.outputsize]
+        if args.month:
+            descriptor_parts.append(args.month)
+        if args.entitlement:
+            descriptor_parts.append(args.entitlement)
+        raw_path = market.persist_raw_market_snapshot(
+            paths,
+            provider=args.provider,
+            granularity="minute",
+            ticker=ticker,
+            text=text,
+            descriptor="_".join(descriptor_parts),
+        )
+        raw_paths[ticker] = str(raw_path)
+        bars.extend(
+            market.parse_alpha_vantage_intraday_csv(
+                text,
+                symbol=ticker,
+                source=f"{args.provider}_api",
+            )
+        )
+
     inserted = db.upsert_market_bars_minute(paths.db_path, bars)
     db.record_ingestion_run(
         db_path=paths.db_path,
-        pipeline_name="market_bars_minute_csv",
+        pipeline_name="market_bars_minute_provider",
         status="success",
         row_count=inserted,
-        metadata={"csv_path": str(args.csv), "source": args.source},
+        metadata={
+            "provider": args.provider,
+            "tickers": requested_tickers,
+            "interval": args.interval,
+            "outputsize": args.outputsize,
+            "month": args.month,
+            "entitlement": args.entitlement,
+            "adjusted": args.adjusted,
+            "extended_hours": args.extended_hours,
+            "raw_paths": raw_paths,
+        },
     )
-    print(f"Stored {inserted} minute market bars from {args.csv}")
+    print(f"Stored {inserted} minute market bars from provider {args.provider}")
     return 0
 
 
@@ -398,6 +590,12 @@ def cmd_serve_api(args: argparse.Namespace) -> int:
         reload=False,
     )
     return 0
+
+
+def _require_provider_tickers(tickers: list[str] | None) -> list[str]:
+    if not tickers:
+        raise SystemExit("`--tickers` is required when using `--provider`.")
+    return [ticker.upper() for ticker in tickers]
 
 
 def main(argv: list[str] | None = None) -> int:

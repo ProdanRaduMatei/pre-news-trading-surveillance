@@ -33,6 +33,10 @@ class ProjectPaths:
             self.gold_dir,
             self.raw_dir / "sec",
             self.raw_dir / "sec" / "submissions",
+            self.raw_dir / "market",
+            self.raw_dir / "market" / "alpha_vantage",
+            self.raw_dir / "market" / "alpha_vantage" / "daily",
+            self.raw_dir / "market" / "alpha_vantage" / "minute",
             self.bronze_dir / "sec",
         ):
             path.mkdir(parents=True, exist_ok=True)

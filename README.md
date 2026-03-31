@@ -93,6 +93,16 @@ Import minute market bars from a CSV with headers `ticker,timestamp,open,high,lo
 pnts ingest-market-minute --csv /absolute/path/to/market_minute.csv
 ```
 
+Or pull market data directly from Alpha Vantage:
+
+```bash
+export ALPHAVANTAGE_API_KEY="your-key"
+pnts ingest-market-daily --provider alpha_vantage --tickers AAPL MSFT --outputsize compact
+pnts ingest-market-minute --provider alpha_vantage --tickers AAPL MSFT --interval 1min --outputsize compact
+```
+
+Optional intraday flags include `--month YYYY-MM`, `--entitlement delayed|realtime`, `--adjusted`, and `--no-extended-hours`.
+
 Build canonical SEC events, compute daily and minute features, and score them:
 
 ```bash
@@ -128,11 +138,19 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - `pnts ingest-sec-filings --user-agent "..." --tickers AAPL MSFT`
 - `pnts ingest-market-daily --csv /path/to/file.csv`
 - `pnts ingest-market-minute --csv /path/to/file.csv`
+- `pnts ingest-market-daily --provider alpha_vantage --tickers AAPL MSFT`
+- `pnts ingest-market-minute --provider alpha_vantage --tickers AAPL MSFT --interval 1min`
 - `pnts build-sec-events --sentiment-backend heuristic|finbert --novelty-backend lexical|sentence-transformers`
 - `pnts compute-daily-features`
 - `pnts compute-minute-features`
 - `pnts score-events`
 - `pnts serve-api`
+
+## Provider Notes
+
+- Alpha Vantage daily bars are available through the `TIME_SERIES_DAILY` endpoint.
+- Alpha Vantage intraday bars are exposed through `TIME_SERIES_INTRADAY`.
+- The repo stores raw provider CSV snapshots under `data/raw/market/alpha_vantage/` before loading normalized rows into DuckDB.
 
 ## Public Dashboard
 
