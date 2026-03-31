@@ -21,6 +21,12 @@ Pre-News Trading Surveillance is a public-facing research platform for ranking u
   - stores raw payloads in `data/raw`
   - writes normalized filing rows to `data/bronze`
   - loads normalized rows into DuckDB tables
+- a canonical SEC event builder and rule-based scoring pipeline that:
+  - builds publishable event rows from raw SEC filings
+  - ingests daily market bars from CSV
+  - computes daily pre-event market features
+  - assigns explainable suspiciousness scores
+  - serves ranked events from a small API
 
 ## Project Layout
 
@@ -67,11 +73,36 @@ pnts ingest-sec-filings \
   --forms 8-K 6-K
 ```
 
+Import daily market bars from a CSV with headers `ticker,date,open,high,low,close,volume`:
+
+```bash
+pnts ingest-market-daily --csv /absolute/path/to/market_daily.csv
+```
+
+Build canonical SEC events, compute daily features, and score them:
+
+```bash
+pnts build-sec-events --forms 8-K 6-K
+pnts compute-daily-features
+pnts score-events
+```
+
+Run the local API:
+
+```bash
+pnts serve-api --host 127.0.0.1 --port 8000
+```
+
 ## Current CLI Commands
 
 - `pnts bootstrap`
 - `pnts ingest-sec-reference --user-agent "..."`
 - `pnts ingest-sec-filings --user-agent "..." --tickers AAPL MSFT`
+- `pnts ingest-market-daily --csv /path/to/file.csv`
+- `pnts build-sec-events`
+- `pnts compute-daily-features`
+- `pnts score-events`
+- `pnts serve-api`
 
 ## Core Docs
 

@@ -4,7 +4,10 @@ import argparse
 from pathlib import Path
 
 from . import db
+from .events import sec_events
+from .features import daily as daily_features
 from .ingest import sec
+from .scoring import rules
 from .settings import default_paths
 
 
@@ -75,6 +78,53 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only write filesystem artifacts and skip database loading.",
     )
 
+    ingest_market_daily = subparsers.add_parser(
+        "ingest-market-daily",
+        help="Load daily market bars from a CSV file into storage.",
+    )
+    ingest_market_daily.add_argument("--csv", type=Path, required=True, help="CSV path.")
+    ingest_market_daily.add_argument(
+        "--source",
+        default="csv_import",
+        help="Source label stored with the imported bars.",
+    )
+
+    build_events = subparsers.add_parser(
+        "build-sec-events",
+        help="Build canonical SEC-backed events from raw filing rows.",
+    )
+    build_events.add_argument(
+        "--forms",
+        nargs="*",
+        default=["8-K", "6-K"],
+        help="Optional SEC form filters.",
+    )
+
+    compute_features = subparsers.add_parser(
+        "compute-daily-features",
+        help="Compute daily pre-event market features for canonical events.",
+    )
+    compute_features.add_argument(
+        "--ticker",
+        help="Optional single-ticker filter.",
+    )
+
+    score_events = subparsers.add_parser(
+        "score-events",
+        help="Score canonical events using the rule-based ranking engine.",
+    )
+    score_events.add_argument(
+        "--ticker",
+        help="Optional single-ticker filter.",
+    )
+
+    serve_api = subparsers.add_parser(
+        "serve-api",
+        help="Run the local API for ranked events.",
+    )
+    serve_api.add_argument("--host", default="127.0.0.1")
+    serve_api.add_argument("--port", type=int, default=8000)
+
     return parser
 
 
@@ -82,7 +132,7 @@ def cmd_bootstrap(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
     db_path = args.db_path or paths.db_path
-    db.init_database(db_path=db_path, schema_path=paths.sql_dir / "001_init.sql")
+    db.init_database(db_path=db_path, schema_dir=paths.sql_dir)
     print(f"Bootstrap complete. DuckDB initialized at {db_path}")
     return 0
 
@@ -96,7 +146,7 @@ def cmd_ingest_sec_reference(args: argparse.Namespace) -> int:
     raw_path, bronze_path = sec.persist_reference_snapshot(paths, payload, references)
 
     if not args.skip_db:
-        db.init_database(db_path=paths.db_path, schema_path=paths.sql_dir / "001_init.sql")
+        db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
         db.upsert_ticker_references(paths.db_path, references)
         db.record_ingestion_run(
             db_path=paths.db_path,
@@ -154,7 +204,7 @@ def cmd_ingest_sec_filings(args: argparse.Namespace) -> int:
     bronze_path = sec.persist_filing_snapshot(paths, filings)
 
     if not args.skip_db:
-        db.init_database(db_path=paths.db_path, schema_path=paths.sql_dir / "001_init.sql")
+        db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
         db.upsert_raw_filings(paths.db_path, filings)
         db.record_ingestion_run(
             db_path=paths.db_path,
@@ -174,6 +224,95 @@ def cmd_ingest_sec_filings(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_market_daily(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    bars = daily_features.load_market_bars_from_csv(args.csv, source=args.source)
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    inserted = db.upsert_market_bars_daily(paths.db_path, bars)
+    db.record_ingestion_run(
+        db_path=paths.db_path,
+        pipeline_name="market_bars_daily_csv",
+        status="success",
+        row_count=inserted,
+        metadata={"csv_path": str(args.csv), "source": args.source},
+    )
+    print(f"Stored {inserted} daily market bars from {args.csv}")
+    return 0
+
+
+def cmd_build_sec_events(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    filings = db.load_raw_filings(paths.db_path, forms=args.forms)
+    events = sec_events.build_canonical_events_from_filings(filings)
+    inserted = db.upsert_events(paths.db_path, events)
+    db.record_ingestion_run(
+        db_path=paths.db_path,
+        pipeline_name="build_sec_events",
+        status="success",
+        row_count=inserted,
+        metadata={"forms": args.forms},
+    )
+    print(f"Built {inserted} canonical events")
+    return 0
+
+
+def cmd_compute_daily_features(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    events = db.load_events(paths.db_path, ticker=args.ticker)
+    bars = db.load_market_bars_daily(paths.db_path, ticker=args.ticker)
+    features = daily_features.compute_event_market_features(events, bars)
+    inserted = db.upsert_event_market_features(paths.db_path, features)
+    db.record_ingestion_run(
+        db_path=paths.db_path,
+        pipeline_name="compute_daily_features",
+        status="success",
+        row_count=inserted,
+        metadata={"ticker": args.ticker},
+    )
+    print(f"Computed {inserted} daily feature rows")
+    return 0
+
+
+def cmd_score_events(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    events = db.load_events(paths.db_path, ticker=args.ticker)
+    scores = rules.score_events_from_database(paths.db_path, events)
+    inserted = db.upsert_event_scores(paths.db_path, scores)
+    db.record_ingestion_run(
+        db_path=paths.db_path,
+        pipeline_name="score_events",
+        status="success",
+        row_count=inserted,
+        metadata={"ticker": args.ticker},
+    )
+    print(f"Scored {inserted} events")
+    return 0
+
+
+def cmd_serve_api(args: argparse.Namespace) -> int:
+    try:
+        import uvicorn
+    except ImportError as exc:
+        raise RuntimeError(
+            "uvicorn is required for `serve-api`. Install dependencies with `pip install -e .`."
+        ) from exc
+
+    uvicorn.run(
+        "pre_news_trading_surveillance.api.app:app",
+        host=args.host,
+        port=args.port,
+        reload=False,
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -184,6 +323,16 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_ingest_sec_reference(args)
     if args.command == "ingest-sec-filings":
         return cmd_ingest_sec_filings(args)
+    if args.command == "ingest-market-daily":
+        return cmd_ingest_market_daily(args)
+    if args.command == "build-sec-events":
+        return cmd_build_sec_events(args)
+    if args.command == "compute-daily-features":
+        return cmd_compute_daily_features(args)
+    if args.command == "score-events":
+        return cmd_score_events(args)
+    if args.command == "serve-api":
+        return cmd_serve_api(args)
 
     parser.error(f"Unknown command: {args.command}")
     return 2

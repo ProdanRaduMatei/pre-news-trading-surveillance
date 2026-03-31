@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
+from .domain import CanonicalEvent, EventMarketFeature, EventScore, MarketBarDaily
 from .ingest.models import RawFilingRecord, TickerReference
 
 
@@ -17,13 +18,18 @@ def _require_duckdb():
     return duckdb
 
 
-def init_database(db_path: Path, schema_path: Path) -> Path:
+def init_database(db_path: Path, schema_path: Path | None = None, schema_dir: Path | None = None) -> Path:
     duckdb = _require_duckdb()
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    schema_sql = schema_path.read_text(encoding="utf-8")
     connection = duckdb.connect(str(db_path))
     try:
-        connection.execute(schema_sql)
+        if schema_dir is not None:
+            for file_path in sorted(schema_dir.glob("*.sql")):
+                connection.execute(file_path.read_text(encoding="utf-8"))
+        elif schema_path is not None:
+            connection.execute(schema_path.read_text(encoding="utf-8"))
+        else:
+            raise ValueError("Either schema_path or schema_dir must be provided.")
     finally:
         connection.close()
     return db_path
@@ -100,6 +106,469 @@ def upsert_raw_filings(db_path: Path, filings: list[RawFilingRecord]) -> int:
     return len(filings)
 
 
+def upsert_market_bars_daily(db_path: Path, bars: list[MarketBarDaily]) -> int:
+    if not bars:
+        return 0
+
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        connection.begin()
+        connection.executemany(
+            "DELETE FROM market_bars_daily WHERE bar_id = ?",
+            [(bar.bar_id,) for bar in bars],
+        )
+        connection.executemany(
+            """
+            INSERT INTO market_bars_daily (
+              bar_id,
+              ticker,
+              trading_date,
+              open,
+              high,
+              low,
+              close,
+              volume,
+              source,
+              ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [bar.as_db_row() for bar in bars],
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return len(bars)
+
+
+def upsert_events(db_path: Path, events: list[CanonicalEvent]) -> int:
+    if not events:
+        return 0
+
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        connection.begin()
+        connection.executemany(
+            "DELETE FROM events WHERE event_id = ?",
+            [(event.event_id,) for event in events],
+        )
+        connection.executemany(
+            """
+            INSERT INTO events (
+              event_id,
+              source_event_id,
+              source_table,
+              ticker,
+              issuer_name,
+              first_public_at,
+              event_date,
+              event_type,
+              sentiment_label,
+              sentiment_score,
+              title,
+              summary,
+              source_url,
+              primary_document,
+              official_source_flag,
+              timestamp_confidence,
+              source_quality,
+              novelty,
+              impact_score,
+              built_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [event.as_db_row() for event in events],
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return len(events)
+
+
+def upsert_event_market_features(db_path: Path, features: list[EventMarketFeature]) -> int:
+    if not features:
+        return 0
+
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        connection.begin()
+        connection.executemany(
+            "DELETE FROM event_market_features_daily WHERE event_id = ?",
+            [(feature.event_id,) for feature in features],
+        )
+        connection.executemany(
+            """
+            INSERT INTO event_market_features_daily (
+              event_id,
+              ticker,
+              as_of_date,
+              pre_1d_return,
+              pre_5d_return,
+              pre_20d_return,
+              volume_z_1d,
+              volume_z_5d,
+              volatility_20d,
+              gap_pct,
+              avg_volume_20d,
+              bars_used,
+              computed_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [feature.as_db_row() for feature in features],
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return len(features)
+
+
+def upsert_event_scores(db_path: Path, scores: list[EventScore]) -> int:
+    if not scores:
+        return 0
+
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        connection.begin()
+        connection.executemany(
+            "DELETE FROM event_scores WHERE event_id = ?",
+            [(score.event_id,) for score in scores],
+        )
+        connection.executemany(
+            """
+            INSERT INTO event_scores (
+              event_id,
+              rule_score,
+              suspiciousness_score,
+              score_band,
+              directional_alignment,
+              explanation_payload,
+              scored_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [score.as_db_row() for score in scores],
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return len(scores)
+
+
+def load_raw_filings(
+    db_path: Path,
+    forms: list[str] | None = None,
+    limit: int | None = None,
+) -> list[RawFilingRecord]:
+    duckdb = _require_duckdb()
+    query = """
+        SELECT
+          filing_id,
+          ticker,
+          cik,
+          company_name,
+          accession_no,
+          form_type,
+          CAST(filing_date AS VARCHAR) AS filing_date,
+          CAST(accepted_at AS VARCHAR) AS accepted_at,
+          primary_document,
+          primary_doc_description,
+          source_url,
+          raw_path,
+          CAST(ingested_at AS VARCHAR) AS ingested_at
+        FROM raw_filings
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if forms:
+        placeholders = ", ".join(["?"] * len(forms))
+        query += f" AND UPPER(form_type) IN ({placeholders})"
+        params.extend([form.upper() for form in forms])
+    query += " ORDER BY COALESCE(accepted_at, CAST(filing_date AS TIMESTAMP), ingested_at) ASC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    connection = duckdb.connect(str(db_path))
+    try:
+        rows = connection.execute(query, params).fetchall()
+    finally:
+        connection.close()
+
+    return [
+        RawFilingRecord(
+            filing_id=row[0],
+            ticker=row[1],
+            cik=row[2],
+            company_name=row[3],
+            accession_no=row[4],
+            form_type=row[5],
+            filing_date=row[6],
+            accepted_at=row[7],
+            primary_document=row[8],
+            primary_doc_description=row[9],
+            source_url=row[10],
+            raw_path=row[11],
+            ingested_at=row[12],
+        )
+        for row in rows
+    ]
+
+
+def load_events(
+    db_path: Path,
+    ticker: str | None = None,
+    event_type: str | None = None,
+    limit: int | None = None,
+) -> list[CanonicalEvent]:
+    duckdb = _require_duckdb()
+    query = """
+        SELECT
+          event_id,
+          source_event_id,
+          source_table,
+          ticker,
+          issuer_name,
+          CAST(first_public_at AS VARCHAR) AS first_public_at,
+          CAST(event_date AS VARCHAR) AS event_date,
+          event_type,
+          sentiment_label,
+          sentiment_score,
+          title,
+          summary,
+          source_url,
+          primary_document,
+          official_source_flag,
+          timestamp_confidence,
+          source_quality,
+          novelty,
+          impact_score,
+          CAST(built_at AS VARCHAR) AS built_at
+        FROM events
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if ticker:
+        query += " AND ticker = ?"
+        params.append(ticker.upper())
+    if event_type:
+        query += " AND event_type = ?"
+        params.append(event_type)
+    query += " ORDER BY first_public_at DESC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    connection = duckdb.connect(str(db_path))
+    try:
+        rows = connection.execute(query, params).fetchall()
+    finally:
+        connection.close()
+
+    return [
+        CanonicalEvent(
+            event_id=row[0],
+            source_event_id=row[1],
+            source_table=row[2],
+            ticker=row[3],
+            issuer_name=row[4],
+            first_public_at=row[5],
+            event_date=row[6],
+            event_type=row[7],
+            sentiment_label=row[8],
+            sentiment_score=float(row[9]),
+            title=row[10],
+            summary=row[11],
+            source_url=row[12],
+            primary_document=row[13],
+            official_source_flag=bool(row[14]),
+            timestamp_confidence=row[15],
+            source_quality=float(row[16]),
+            novelty=float(row[17]),
+            impact_score=float(row[18]),
+            built_at=row[19],
+        )
+        for row in rows
+    ]
+
+
+def load_market_bars_daily(db_path: Path, ticker: str | None = None) -> list[MarketBarDaily]:
+    duckdb = _require_duckdb()
+    query = """
+        SELECT
+          bar_id,
+          ticker,
+          CAST(trading_date AS VARCHAR) AS trading_date,
+          open,
+          high,
+          low,
+          close,
+          volume,
+          source,
+          CAST(ingested_at AS VARCHAR) AS ingested_at
+        FROM market_bars_daily
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if ticker:
+        query += " AND ticker = ?"
+        params.append(ticker.upper())
+    query += " ORDER BY ticker, trading_date ASC"
+
+    connection = duckdb.connect(str(db_path))
+    try:
+        rows = connection.execute(query, params).fetchall()
+    finally:
+        connection.close()
+
+    return [
+        MarketBarDaily(
+            bar_id=row[0],
+            ticker=row[1],
+            trading_date=row[2],
+            open=float(row[3]),
+            high=float(row[4]),
+            low=float(row[5]),
+            close=float(row[6]),
+            volume=int(row[7]),
+            source=row[8],
+            ingested_at=row[9],
+        )
+        for row in rows
+    ]
+
+
+def list_ranked_events(
+    db_path: Path,
+    limit: int = 25,
+    ticker: str | None = None,
+    event_type: str | None = None,
+    min_score: float | None = None,
+) -> list[dict[str, object]]:
+    duckdb = _require_duckdb()
+    query = """
+        SELECT
+          e.event_id,
+          e.ticker,
+          e.issuer_name,
+          CAST(e.first_public_at AS VARCHAR) AS first_public_at,
+          e.event_type,
+          e.sentiment_label,
+          e.title,
+          e.summary,
+          e.source_url,
+          e.timestamp_confidence,
+          e.novelty,
+          e.impact_score,
+          f.pre_1d_return,
+          f.pre_5d_return,
+          f.volume_z_1d,
+          f.volume_z_5d,
+          s.suspiciousness_score,
+          s.score_band,
+          s.explanation_payload
+        FROM events e
+        LEFT JOIN event_market_features_daily f ON e.event_id = f.event_id
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if ticker:
+        query += " AND e.ticker = ?"
+        params.append(ticker.upper())
+    if event_type:
+        query += " AND e.event_type = ?"
+        params.append(event_type)
+    if min_score is not None:
+        query += " AND COALESCE(s.suspiciousness_score, 0) >= ?"
+        params.append(min_score)
+
+    query += " ORDER BY COALESCE(s.suspiciousness_score, 0) DESC, e.first_public_at DESC LIMIT ?"
+    params.append(limit)
+
+    connection = duckdb.connect(str(db_path))
+    try:
+        columns = [column[0] for column in connection.execute(query, params).description]
+        rows = connection.execute(query, params).fetchall()
+    finally:
+        connection.close()
+
+    return [_row_to_dict(columns, row) for row in rows]
+
+
+def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
+    duckdb = _require_duckdb()
+    query = """
+        SELECT
+          e.event_id,
+          e.source_event_id,
+          e.source_table,
+          e.ticker,
+          e.issuer_name,
+          CAST(e.first_public_at AS VARCHAR) AS first_public_at,
+          CAST(e.event_date AS VARCHAR) AS event_date,
+          e.event_type,
+          e.sentiment_label,
+          e.sentiment_score,
+          e.title,
+          e.summary,
+          e.source_url,
+          e.primary_document,
+          e.official_source_flag,
+          e.timestamp_confidence,
+          e.source_quality,
+          e.novelty,
+          e.impact_score,
+          f.pre_1d_return,
+          f.pre_5d_return,
+          f.pre_20d_return,
+          f.volume_z_1d,
+          f.volume_z_5d,
+          f.volatility_20d,
+          f.gap_pct,
+          f.avg_volume_20d,
+          f.bars_used,
+          s.rule_score,
+          s.suspiciousness_score,
+          s.score_band,
+          s.directional_alignment,
+          s.explanation_payload
+        FROM events e
+        LEFT JOIN event_market_features_daily f ON e.event_id = f.event_id
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        WHERE e.event_id = ?
+    """
+
+    connection = duckdb.connect(str(db_path))
+    try:
+        cursor = connection.execute(query, [event_id])
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        columns = [column[0] for column in cursor.description]
+    finally:
+        connection.close()
+
+    return _row_to_dict(columns, row)
+
+
 def record_ingestion_run(
     db_path: Path,
     pipeline_name: str,
@@ -134,3 +603,14 @@ def record_ingestion_run(
     finally:
         connection.close()
     return run_id
+
+
+def _row_to_dict(columns: list[str], row: tuple[object, ...]) -> dict[str, object]:
+    record = dict(zip(columns, row))
+    payload = record.get("explanation_payload")
+    if isinstance(payload, str):
+        try:
+            record["explanation_payload"] = json.loads(payload)
+        except json.JSONDecodeError:
+            pass
+    return record
