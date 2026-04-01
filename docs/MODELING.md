@@ -66,6 +66,20 @@ Use weak supervision:
 - `NDCG`
 - ablations against rule-only, market-only, and NLP-only variants
 
+## Implemented Evaluation Layer
+
+The repository now includes:
+
+- benchmark label storage in DuckDB via `benchmark_event_labels`
+- manual review queue export and reviewed-label import commands
+- chronological backtests written to `reports/evaluation/`
+- ablation reporting across:
+  - `rules`
+  - `nlp_only`
+  - `market_only`
+  - `anomaly_only`
+  - `hybrid`
+
 ## Explainability
 
 Every score must be backed by deterministic feature outputs stored at scoring time. LLM-generated explanations, if used, should only rewrite existing evidence rather than invent reasoning.

@@ -1,0 +1,6 @@
+event_id,ticker,issuer_name,first_public_at,event_type,title,current_score,score_band,source_url,candidate_bucket,suggested_label,review_label,review_status,reviewer,confidence,review_notes
+sec-event:0000320193:0000320193-25-000077,AAPL,Apple Inc.,2025-10-30 18:30:35,earnings,8-K,62.7,Medium,https://www.sec.gov/Archives/edgar/data/320193/000032019325000077/aapl-20251030.htm,high_priority,suspicious,,pending_review,,,
+sec-event:0000320193:0001140361-25-044561,AAPL,Apple Inc.,2025-12-05 19:31:42,executive_change,8-K,58.95,Medium,https://www.sec.gov/Archives/edgar/data/320193/000114036125044561/ef20060722_8k.htm,high_priority,suspicious,,pending_review,,,
+sec-event:0000320193:0000320193-26-000005,AAPL,Apple Inc.,2026-01-29 19:30:33,earnings,8-K,58.95,Medium,https://www.sec.gov/Archives/edgar/data/320193/000032019326000005/aapl-20260129.htm,high_priority,suspicious,,pending_review,,,
+sec-event:0000320193:0001140361-26-006577,AAPL,Apple Inc.,2026-02-24 19:55:58,other,8-K,53.7,Medium,https://www.sec.gov/Archives/edgar/data/320193/000114036126006577/ef20060722_8k.htm,high_priority,suspicious,,pending_review,,,
+sec-event:0000320193:0001140361-26-000199,AAPL,Apple Inc.,2026-01-02 19:30:52,executive_change,8-K,44.7,Low,https://www.sec.gov/Archives/edgar/data/320193/000114036126000199/ef20060722_8k.htm,high_priority,suspicious,,pending_review,,,

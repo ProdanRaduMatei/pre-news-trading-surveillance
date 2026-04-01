@@ -132,6 +132,14 @@ pnts train-model-stack --min-samples 12
 pnts score-events --engine hybrid
 ```
 
+Export a manual benchmark review queue, import reviewed labels, and run the historical backtest:
+
+```bash
+pnts export-benchmark-candidates --output-csv data/benchmarks/review_candidates.csv --top-k 50 --bottom-k 50
+pnts import-benchmark-labels --csv data/benchmarks/reviewed_benchmark.csv --reviewer "Your Name"
+pnts run-backtest --folds 3 --min-train-size 24 --k-values 5 10 25
+```
+
 Inspect recent ingestion, feature, scoring, and publish runs:
 
 ```bash
@@ -185,6 +193,9 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - `pnts compute-daily-features`
 - `pnts compute-minute-features`
 - `pnts train-model-stack --min-samples 12`
+- `pnts export-benchmark-candidates --output-csv data/benchmarks/review_candidates.csv`
+- `pnts import-benchmark-labels --csv data/benchmarks/reviewed_benchmark.csv`
+- `pnts run-backtest --folds 3 --min-train-size 24`
 - `pnts score-events`
 - `pnts list-ingestion-runs --limit 20`
 - `pnts publish-snapshot --output-dir data/publish/current`
@@ -262,6 +273,14 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - Run metadata includes retry counts, upstream lineage, and immutable artifact paths for raw ingests, feature snapshots, scoring inputs, and score outputs.
 - The API exposes internal run visibility at `/ingestion-runs` when serving directly from DuckDB.
 - Trained anomaly-stack artifacts live under `data/models/scoring/current/` and include a `manifest.json` plus a pickled model bundle.
+- Reviewed benchmark labels live in DuckDB under `benchmark_event_labels`, and evaluation reports are written to `reports/evaluation/`.
+
+## Evaluation And Credibility
+
+- Manual review queues can be exported to `data/benchmarks/review_candidates.csv`.
+- Use [reviewed_benchmark.template.csv](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/data/benchmarks/reviewed_benchmark.template.csv) as the starter schema for reviewed suspicious/control labels.
+- Historical backtests report `Precision@K`, top-decile lift, and ablations across rule, NLP-only, market-only, anomaly-only, and hybrid engines.
+- Full workflow details live in [EVALUATION.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/EVALUATION.md).
 
 ## Core Docs
 
@@ -269,6 +288,7 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - [ARCHITECTURE.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/ARCHITECTURE.md)
 - [DATA_SCHEMA.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/DATA_SCHEMA.md)
 - [MODELING.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/MODELING.md)
+- [EVALUATION.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/EVALUATION.md)
 - [DEPLOYMENT.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/DEPLOYMENT.md)
 - [RISK_AND_LIMITATIONS.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/RISK_AND_LIMITATIONS.md)
 

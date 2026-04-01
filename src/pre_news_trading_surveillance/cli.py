@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import artifacts, db
+from .evaluation import backtest as evaluation_backtest
+from .evaluation import benchmark as evaluation_benchmark
 from .events import sec_events
 from .features import daily as daily_features
 from .features import minute as minute_features
@@ -394,6 +396,109 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to train the LightGBM ranker on top of the anomaly features.",
+    )
+
+    export_benchmark_candidates = subparsers.add_parser(
+        "export-benchmark-candidates",
+        help="Export top-ranked and low-ranked review candidates for manual suspicious/control labeling.",
+    )
+    export_benchmark_candidates.add_argument(
+        "--output-csv",
+        type=Path,
+        default=Path("data/benchmarks/review_candidates.csv"),
+        help="CSV path for the manual review queue.",
+    )
+    export_benchmark_candidates.add_argument(
+        "--ticker",
+        help="Optional single-ticker filter.",
+    )
+    export_benchmark_candidates.add_argument(
+        "--top-k",
+        type=int,
+        default=50,
+        help="Number of high-scoring candidates to export.",
+    )
+    export_benchmark_candidates.add_argument(
+        "--bottom-k",
+        type=int,
+        default=50,
+        help="Number of low-scoring control candidates to export.",
+    )
+
+    import_benchmark_labels = subparsers.add_parser(
+        "import-benchmark-labels",
+        help="Import reviewed suspicious/control labels from a CSV into DuckDB.",
+    )
+    import_benchmark_labels.add_argument(
+        "--csv",
+        type=Path,
+        required=True,
+        help="CSV containing reviewed benchmark labels.",
+    )
+    import_benchmark_labels.add_argument(
+        "--reviewer",
+        help="Optional reviewer name to apply when the CSV does not specify one.",
+    )
+    import_benchmark_labels.add_argument(
+        "--label-source",
+        default="manual_review",
+        help="Source label stored with the imported benchmark annotations.",
+    )
+
+    run_backtest = subparsers.add_parser(
+        "run-backtest",
+        help="Run time-split backtests over reviewed benchmark events and write JSON/Markdown reports.",
+    )
+    run_backtest.add_argument(
+        "--review-status",
+        default="reviewed",
+        help="Benchmark review status to include, defaults to reviewed.",
+    )
+    run_backtest.add_argument(
+        "--benchmark-labels",
+        nargs="*",
+        default=["suspicious", "control"],
+        help="Benchmark labels to include in the backtest.",
+    )
+    run_backtest.add_argument(
+        "--reviewer",
+        help="Optional reviewer filter.",
+    )
+    run_backtest.add_argument(
+        "--folds",
+        type=int,
+        default=3,
+        help="Number of chronological test folds.",
+    )
+    run_backtest.add_argument(
+        "--min-train-size",
+        type=int,
+        default=24,
+        help="Minimum reviewed events to hold out before the first test fold.",
+    )
+    run_backtest.add_argument(
+        "--k-values",
+        nargs="*",
+        type=int,
+        default=[5, 10, 25],
+        help="Ranking cutoffs for Precision@K reporting.",
+    )
+    run_backtest.add_argument(
+        "--contamination",
+        type=float,
+        default=0.12,
+        help="IsolationForest contamination used in anomaly-based ablations.",
+    )
+    run_backtest.add_argument(
+        "--use-ranker",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether the hybrid backtest should include the LightGBM ranker.",
+    )
+    run_backtest.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Directory for JSON and Markdown backtest reports. Defaults to reports/evaluation.",
     )
 
     publish_job = subparsers.add_parser(
@@ -1110,6 +1215,132 @@ def cmd_train_model_stack(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export_benchmark_candidates(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    output_csv = args.output_csv
+    if not output_csv.is_absolute():
+        output_csv = paths.root / output_csv
+    with tracked_ingestion_run(
+        paths=paths,
+        pipeline_name="export_benchmark_candidates",
+        metadata={
+            "ticker": args.ticker,
+            "top_k": args.top_k,
+            "bottom_k": args.bottom_k,
+            "output_csv": str(output_csv),
+        },
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        details = db.load_scoring_event_details(paths.db_path, ticker=args.ticker)
+        exported = evaluation_benchmark.export_review_candidates(
+            details,
+            output_path=output_csv,
+            top_k=args.top_k,
+            bottom_k=args.bottom_k,
+        )
+        tracker.row_count = exported
+        tracker.add_artifact(output_csv)
+        tracker.metadata.update({"events_loaded": len(details)})
+    print(f"Exported {exported} benchmark review candidates to {output_csv}")
+    return 0
+
+
+def cmd_import_benchmark_labels(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    csv_path = args.csv if args.csv.is_absolute() else (paths.root / args.csv)
+    with tracked_ingestion_run(
+        paths=paths,
+        pipeline_name="import_benchmark_labels",
+        metadata={
+            "csv_path": str(csv_path),
+            "reviewer": args.reviewer,
+            "label_source": args.label_source,
+        },
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        labels = evaluation_benchmark.load_reviewed_labels_csv(
+            csv_path,
+            default_reviewer=args.reviewer,
+            default_label_source=args.label_source,
+        )
+        snapshot_path = artifacts.write_ndjson_snapshot(
+            paths.silver_dir / "evaluation",
+            name_prefix="benchmark_labels",
+            rows=[label.as_dict() for label in labels],
+        )
+        inserted = db.upsert_benchmark_labels(paths.db_path, labels)
+        tracker.row_count = inserted
+        tracker.add_artifact(csv_path)
+        tracker.add_artifact(snapshot_path)
+        tracker.metadata.update(
+            {
+                "labels_loaded": len(labels),
+                "snapshot_path": str(snapshot_path),
+            }
+        )
+    print(f"Imported {inserted} benchmark labels from {csv_path}")
+    return 0
+
+
+def cmd_run_backtest(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    output_dir = args.output_dir or (paths.reports_dir / "evaluation")
+    with tracked_ingestion_run(
+        paths=paths,
+        pipeline_name="run_backtest",
+        metadata={
+            "review_status": args.review_status,
+            "benchmark_labels": args.benchmark_labels,
+            "reviewer": args.reviewer,
+            "folds": args.folds,
+            "min_train_size": args.min_train_size,
+            "k_values": args.k_values,
+            "contamination": args.contamination,
+            "use_ranker": args.use_ranker,
+            "output_dir": str(output_dir),
+        },
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        details = db.load_benchmark_event_details(
+            paths.db_path,
+            review_status=args.review_status,
+            benchmark_labels=args.benchmark_labels,
+            reviewer=args.reviewer,
+        )
+        benchmark_snapshot = artifacts.write_ndjson_snapshot(
+            paths.silver_dir / "evaluation",
+            name_prefix="backtest_benchmark",
+            rows=details,
+        )
+        report = evaluation_backtest.run_backtest(
+            details,
+            output_dir=output_dir,
+            folds=args.folds,
+            min_train_size=args.min_train_size,
+            k_values=args.k_values,
+            contamination=args.contamination,
+            use_ranker=args.use_ranker,
+        )
+        tracker.row_count = len(details)
+        tracker.add_artifact(benchmark_snapshot)
+        tracker.add_artifact(report.json_path)
+        tracker.add_artifact(report.markdown_path)
+        tracker.metadata.update(
+            {
+                "reviewed_events": len(details),
+                "json_report_path": str(report.json_path),
+                "markdown_report_path": str(report.markdown_path),
+                "overall_metrics": report.report.get("overall", {}),
+            }
+        )
+    print(f"Backtest report: {report.json_path}")
+    print(f"Backtest summary: {report.markdown_path}")
+    return 0
+
+
 def cmd_publish_snapshot(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
@@ -1274,6 +1505,12 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compute_minute_features(args)
     if args.command == "train-model-stack":
         return cmd_train_model_stack(args)
+    if args.command == "export-benchmark-candidates":
+        return cmd_export_benchmark_candidates(args)
+    if args.command == "import-benchmark-labels":
+        return cmd_import_benchmark_labels(args)
+    if args.command == "run-backtest":
+        return cmd_run_backtest(args)
     if args.command == "score-events":
         return cmd_score_events(args)
     if args.command == "publish-snapshot":

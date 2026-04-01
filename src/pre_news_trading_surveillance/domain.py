@@ -284,3 +284,47 @@ class EventScore:
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class BenchmarkLabel:
+    event_id: str
+    benchmark_label: str
+    review_status: str
+    reviewer: str | None
+    label_source: str
+    confidence: float | None
+    review_notes: str | None
+    metadata_json: str | None
+    created_at: str
+    updated_at: str
+
+    def as_db_row(
+        self,
+    ) -> tuple[
+        str,
+        str,
+        str,
+        str | None,
+        str,
+        float | None,
+        str | None,
+        str | None,
+        str,
+        str,
+    ]:
+        return (
+            self.event_id,
+            self.benchmark_label,
+            self.review_status,
+            self.reviewer,
+            self.label_source,
+            self.confidence,
+            self.review_notes,
+            self.metadata_json,
+            self.created_at,
+            self.updated_at,
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)

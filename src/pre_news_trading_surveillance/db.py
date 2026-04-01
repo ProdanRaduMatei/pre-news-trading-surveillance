@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from .domain import (
+    BenchmarkLabel,
     CanonicalEvent,
     EventMarketFeature,
     EventMarketFeatureMinute,
@@ -434,6 +435,45 @@ def upsert_event_scores(db_path: Path, scores: list[EventScore]) -> int:
     finally:
         connection.close()
     return len(scores)
+
+
+def upsert_benchmark_labels(db_path: Path, labels: list[BenchmarkLabel]) -> int:
+    if not labels:
+        return 0
+
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        connection.begin()
+        connection.executemany(
+            "DELETE FROM benchmark_event_labels WHERE event_id = ?",
+            [(label.event_id,) for label in labels],
+        )
+        connection.executemany(
+            """
+            INSERT INTO benchmark_event_labels (
+              event_id,
+              benchmark_label,
+              review_status,
+              reviewer,
+              label_source,
+              confidence,
+              review_notes,
+              metadata_json,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [label.as_db_row() for label in labels],
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return len(labels)
 
 
 def load_raw_filings(
@@ -976,6 +1016,142 @@ def load_scoring_event_details(
         query += " LIMIT ?"
         params.append(limit)
     return _fetch_dict_rows(db_path, query, params)
+
+
+def load_benchmark_event_details(
+    db_path: Path,
+    *,
+    review_status: str = "reviewed",
+    benchmark_labels: list[str] | None = None,
+    reviewer: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, object]]:
+    query = """
+        SELECT
+          e.event_id,
+          e.source_event_id,
+          e.source_table,
+          e.ticker,
+          e.issuer_name,
+          CAST(e.first_public_at AS VARCHAR) AS first_public_at,
+          CAST(e.event_date AS VARCHAR) AS event_date,
+          e.event_type,
+          e.sentiment_label,
+          e.sentiment_score,
+          e.title,
+          e.summary,
+          e.source_url,
+          e.primary_document,
+          e.sec_items_json,
+          e.official_source_flag,
+          e.timestamp_confidence,
+          e.classifier_backend,
+          e.sentiment_backend,
+          e.novelty_backend,
+          e.source_quality,
+          e.novelty,
+          e.impact_score,
+          CAST(e.built_at AS VARCHAR) AS built_at,
+          f.pre_1d_return,
+          f.pre_5d_return,
+          f.pre_20d_return,
+          CAST(f.as_of_date AS VARCHAR) AS as_of_date,
+          f.volume_z_1d,
+          f.volume_z_5d,
+          f.volatility_20d,
+          f.gap_pct,
+          f.avg_volume_20d,
+          f.bars_used,
+          fm.pre_15m_return,
+          fm.pre_60m_return,
+          fm.pre_240m_return,
+          CAST(fm.as_of_timestamp AS VARCHAR) AS minute_as_of_timestamp,
+          fm.volume_z_15m,
+          fm.volume_z_60m,
+          fm.realized_vol_60m,
+          fm.range_pct_60m,
+          CAST(fm.last_bar_at AS VARCHAR) AS last_bar_at,
+          fm.bars_used AS minute_bars_used,
+          s.rule_score,
+          s.suspiciousness_score,
+          s.score_band,
+          s.directional_alignment,
+          s.explanation_payload,
+          CAST(s.scored_at AS VARCHAR) AS scored_at,
+          b.benchmark_label,
+          b.review_status,
+          b.reviewer,
+          b.label_source,
+          b.confidence,
+          b.review_notes,
+          b.metadata_json,
+          CAST(b.created_at AS VARCHAR) AS benchmark_created_at,
+          CAST(b.updated_at AS VARCHAR) AS benchmark_updated_at
+        FROM benchmark_event_labels b
+        INNER JOIN events e ON b.event_id = e.event_id
+        LEFT JOIN event_market_features_daily f ON e.event_id = f.event_id
+        LEFT JOIN event_market_features_minute fm ON e.event_id = fm.event_id
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if review_status:
+        query += " AND b.review_status = ?"
+        params.append(review_status)
+    if reviewer:
+        query += " AND b.reviewer = ?"
+        params.append(reviewer)
+    if benchmark_labels:
+        placeholders = ", ".join("?" for _ in benchmark_labels)
+        query += f" AND b.benchmark_label IN ({placeholders})"
+        params.extend(benchmark_labels)
+
+    query += " ORDER BY e.first_public_at ASC, e.event_id ASC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    return _fetch_dict_rows(db_path, query, params)
+
+
+def list_benchmark_labels(
+    db_path: Path,
+    *,
+    limit: int = 100,
+    review_status: str | None = None,
+    benchmark_label: str | None = None,
+) -> list[dict[str, object]]:
+    filters: list[str] = []
+    params: list[object] = []
+    if review_status:
+        filters.append("review_status = ?")
+        params.append(review_status)
+    if benchmark_label:
+        filters.append("benchmark_label = ?")
+        params.append(benchmark_label)
+
+    where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
+    params.append(limit)
+    return _fetch_dict_rows(
+        db_path,
+        f"""
+        SELECT
+          event_id,
+          benchmark_label,
+          review_status,
+          reviewer,
+          label_source,
+          confidence,
+          review_notes,
+          metadata_json,
+          CAST(created_at AS VARCHAR) AS created_at,
+          CAST(updated_at AS VARCHAR) AS updated_at
+        FROM benchmark_event_labels
+        {where_sql}
+        ORDER BY updated_at DESC, event_id ASC
+        LIMIT ?
+        """,
+        params,
+    )
 
 
 def get_dashboard_summary(db_path: Path, *, max_first_public_at: str | None = None) -> dict[str, object]:

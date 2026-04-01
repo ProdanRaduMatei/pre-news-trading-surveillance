@@ -36,6 +36,42 @@ NUMERIC_FEATURES = [
     "minute_bars_used",
 ]
 
+NLP_FEATURES = [
+    "sentiment_score",
+    "novelty",
+    "impact_score",
+    "source_quality",
+    "sentiment_direction",
+    "timestamp_confidence_score",
+    "official_source_flag",
+]
+
+MARKET_FEATURES = [
+    "pre_15m_return",
+    "pre_60m_return",
+    "pre_240m_return",
+    "pre_1d_return",
+    "pre_5d_return",
+    "pre_20d_return",
+    "volume_z_15m",
+    "volume_z_60m",
+    "volume_z_1d",
+    "volume_z_5d",
+    "realized_vol_60m",
+    "range_pct_60m",
+    "volatility_20d",
+    "gap_pct",
+    "avg_volume_20d",
+    "bars_used",
+    "minute_bars_used",
+]
+
+METADATA_FEATURES = [
+    "source_is_press_release",
+    "source_is_sec_filing",
+    "event_type_hash",
+]
+
 
 @dataclass(frozen=True)
 class TrainingArtifacts:
@@ -68,7 +104,7 @@ def train_model_stack(
             str(item.get("event_id", "")),
         ),
     )
-    X = np.asarray([_build_feature_vector(detail) for detail in sorted_details], dtype=float)
+    X = build_feature_matrix(sorted_details)
     baseline_scores = [rules.score_event_detail(detail) for detail in sorted_details]
     rule_values = np.asarray([score.rule_score for score in baseline_scores], dtype=float)
 
@@ -209,7 +245,7 @@ def _score_with_models(
     model_manifest: dict[str, object] | None,
 ):
     np = _require_numpy()
-    X = np.asarray([_build_feature_vector(detail)], dtype=float)
+    X = build_feature_matrix([detail])
     anomaly_raw = -model_bundle["isolation_forest"].score_samples(X)
     anomaly_score = _normalize_value(float(anomaly_raw[0]), model_bundle["anomaly_bounds"])
 
@@ -286,21 +322,6 @@ def _score_with_rule_fallback(baseline_score, requested_engine: str, fallback_re
     )
 
 
-def _build_feature_vector(detail: dict[str, object]) -> list[float]:
-    vector = [_coerce_float(detail.get(feature_name)) for feature_name in NUMERIC_FEATURES]
-    vector.extend(
-        [
-            _sentiment_direction(detail.get("sentiment_label")),
-            _timestamp_confidence(detail.get("timestamp_confidence")),
-            1.0 if bool(detail.get("official_source_flag", False)) else 0.0,
-            1.0 if str(detail.get("source_table", "")).strip() == "raw_issuer_releases" else 0.0,
-            1.0 if str(detail.get("source_table", "")).strip() == "raw_filings" else 0.0,
-            _event_type_hash(detail.get("event_type")),
-        ]
-    )
-    return vector
-
-
 def _feature_names() -> list[str]:
     return [
         *NUMERIC_FEATURES,
@@ -311,6 +332,51 @@ def _feature_names() -> list[str]:
         "source_is_sec_filing",
         "event_type_hash",
     ]
+
+
+def feature_names() -> list[str]:
+    return _feature_names()
+
+
+def feature_map(detail: dict[str, object]) -> dict[str, float]:
+    mapped = {feature_name: _coerce_float(detail.get(feature_name)) for feature_name in NUMERIC_FEATURES}
+    mapped.update(
+        {
+            "sentiment_direction": _sentiment_direction(detail.get("sentiment_label")),
+            "timestamp_confidence_score": _timestamp_confidence(detail.get("timestamp_confidence")),
+            "official_source_flag": 1.0 if bool(detail.get("official_source_flag", False)) else 0.0,
+            "source_is_press_release": 1.0
+            if str(detail.get("source_table", "")).strip() == "raw_issuer_releases"
+            else 0.0,
+            "source_is_sec_filing": 1.0
+            if str(detail.get("source_table", "")).strip() == "raw_filings"
+            else 0.0,
+            "event_type_hash": _event_type_hash(detail.get("event_type")),
+        }
+    )
+    return mapped
+
+
+def build_feature_vector(
+    detail: dict[str, object],
+    *,
+    feature_subset: list[str] | None = None,
+) -> list[float]:
+    selected_features = feature_subset or _feature_names()
+    mapped = feature_map(detail)
+    return [mapped.get(feature_name, 0.0) for feature_name in selected_features]
+
+
+def build_feature_matrix(
+    details: list[dict[str, object]],
+    *,
+    feature_subset: list[str] | None = None,
+):
+    np = _require_numpy()
+    return np.asarray(
+        [build_feature_vector(detail, feature_subset=feature_subset) for detail in details],
+        dtype=float,
+    )
 
 
 def _weak_relevance_labels(values) -> Any:

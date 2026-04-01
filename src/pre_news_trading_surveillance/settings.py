@@ -9,10 +9,12 @@ class ProjectPaths:
     root: Path
     docs_dir: Path
     configs_dir: Path
+    reports_dir: Path
     sql_dir: Path
     src_dir: Path
     tests_dir: Path
     data_dir: Path
+    benchmarks_dir: Path
     raw_dir: Path
     bronze_dir: Path
     silver_dir: Path
@@ -25,10 +27,12 @@ class ProjectPaths:
         for path in (
             self.docs_dir,
             self.configs_dir,
+            self.reports_dir,
             self.sql_dir,
             self.src_dir,
             self.tests_dir,
             self.data_dir,
+            self.benchmarks_dir,
             self.raw_dir,
             self.bronze_dir,
             self.silver_dir,
@@ -55,6 +59,7 @@ class ProjectPaths:
             self.silver_dir / "features" / "daily",
             self.silver_dir / "features" / "minute",
             self.silver_dir / "scoring",
+            self.silver_dir / "evaluation",
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -66,10 +71,12 @@ def default_paths(root: Path | None = None) -> ProjectPaths:
         root=project_root,
         docs_dir=project_root / "docs",
         configs_dir=project_root / "configs",
+        reports_dir=project_root / "reports",
         sql_dir=project_root / "sql",
         src_dir=project_root / "src",
         tests_dir=project_root / "tests",
         data_dir=data_dir,
+        benchmarks_dir=data_dir / "benchmarks",
         raw_dir=data_dir / "raw",
         bronze_dir=data_dir / "bronze",
         silver_dir=data_dir / "silver",
