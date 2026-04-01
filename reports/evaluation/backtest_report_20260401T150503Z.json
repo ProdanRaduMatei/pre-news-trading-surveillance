@@ -1,0 +1,348 @@
+{
+  "benchmark": {
+    "contamination": 0.12,
+    "control_labels": 12,
+    "fold_count": 3,
+    "k_values": [
+      5,
+      10,
+      25
+    ],
+    "positive_labels": 12,
+    "ranker_enabled": true,
+    "reviewed_events": 24
+  },
+  "folds": [
+    {
+      "base_rate": 1.0,
+      "engines": {
+        "anomaly_only": {
+          "base_rate": 1.0,
+          "evaluated_events": 4,
+          "positive_labels": 4,
+          "precision_at": {
+            "10": 1.0,
+            "25": 1.0,
+            "5": 1.0
+          },
+          "top_decile_lift": 1.0,
+          "top_decile_precision": 1.0,
+          "top_decile_size": 1
+        },
+        "hybrid": {
+          "base_rate": 1.0,
+          "evaluated_events": 4,
+          "positive_labels": 4,
+          "precision_at": {
+            "10": 1.0,
+            "25": 1.0,
+            "5": 1.0
+          },
+          "top_decile_lift": 1.0,
+          "top_decile_precision": 1.0,
+          "top_decile_size": 1
+        },
+        "market_only": {
+          "base_rate": 1.0,
+          "evaluated_events": 4,
+          "positive_labels": 4,
+          "precision_at": {
+            "10": 1.0,
+            "25": 1.0,
+            "5": 1.0
+          },
+          "top_decile_lift": 1.0,
+          "top_decile_precision": 1.0,
+          "top_decile_size": 1
+        },
+        "nlp_only": {
+          "base_rate": 1.0,
+          "evaluated_events": 4,
+          "positive_labels": 4,
+          "precision_at": {
+            "10": 1.0,
+            "25": 1.0,
+            "5": 1.0
+          },
+          "top_decile_lift": 1.0,
+          "top_decile_precision": 1.0,
+          "top_decile_size": 1
+        },
+        "rules": {
+          "base_rate": 1.0,
+          "evaluated_events": 4,
+          "positive_labels": 4,
+          "precision_at": {
+            "10": 1.0,
+            "25": 1.0,
+            "5": 1.0
+          },
+          "top_decile_lift": 1.0,
+          "top_decile_precision": 1.0,
+          "top_decile_size": 1
+        }
+      },
+      "fold_index": 1,
+      "period": {
+        "test_end": "2021-05-26 08:51:23",
+        "test_start": "2020-08-26 08:54:30",
+        "train_end": "2020-08-03 08:30:14",
+        "train_start": "2016-02-18 09:05:12"
+      },
+      "test_count": 4,
+      "train_count": 12
+    },
+    {
+      "base_rate": 0.25,
+      "engines": {
+        "anomaly_only": {
+          "base_rate": 0.25,
+          "evaluated_events": 4,
+          "positive_labels": 1,
+          "precision_at": {
+            "10": 0.25,
+            "25": 0.25,
+            "5": 0.25
+          },
+          "top_decile_lift": 0.0,
+          "top_decile_precision": 0.0,
+          "top_decile_size": 1
+        },
+        "hybrid": {
+          "base_rate": 0.25,
+          "evaluated_events": 4,
+          "positive_labels": 1,
+          "precision_at": {
+            "10": 0.25,
+            "25": 0.25,
+            "5": 0.25
+          },
+          "top_decile_lift": 0.0,
+          "top_decile_precision": 0.0,
+          "top_decile_size": 1
+        },
+        "market_only": {
+          "base_rate": 0.25,
+          "evaluated_events": 4,
+          "positive_labels": 1,
+          "precision_at": {
+            "10": 0.25,
+            "25": 0.25,
+            "5": 0.25
+          },
+          "top_decile_lift": 0.0,
+          "top_decile_precision": 0.0,
+          "top_decile_size": 1
+        },
+        "nlp_only": {
+          "base_rate": 0.25,
+          "evaluated_events": 4,
+          "positive_labels": 1,
+          "precision_at": {
+            "10": 0.25,
+            "25": 0.25,
+            "5": 0.25
+          },
+          "top_decile_lift": 4.0,
+          "top_decile_precision": 1.0,
+          "top_decile_size": 1
+        },
+        "rules": {
+          "base_rate": 0.25,
+          "evaluated_events": 4,
+          "positive_labels": 1,
+          "precision_at": {
+            "10": 0.25,
+            "25": 0.25,
+            "5": 0.25
+          },
+          "top_decile_lift": 4.0,
+          "top_decile_precision": 1.0,
+          "top_decile_size": 1
+        }
+      },
+      "fold_index": 2,
+      "period": {
+        "test_end": "2024-03-28 19:08:43",
+        "test_start": "2022-04-29 10:00:02",
+        "train_end": "2021-05-26 08:51:23",
+        "train_start": "2016-02-18 09:05:12"
+      },
+      "test_count": 4,
+      "train_count": 16
+    },
+    {
+      "base_rate": 0.0,
+      "engines": {
+        "anomaly_only": {
+          "base_rate": 0.0,
+          "evaluated_events": 4,
+          "positive_labels": 0,
+          "precision_at": {
+            "10": 0.0,
+            "25": 0.0,
+            "5": 0.0
+          },
+          "top_decile_lift": null,
+          "top_decile_precision": 0.0,
+          "top_decile_size": 1
+        },
+        "hybrid": {
+          "base_rate": 0.0,
+          "evaluated_events": 4,
+          "positive_labels": 0,
+          "precision_at": {
+            "10": 0.0,
+            "25": 0.0,
+            "5": 0.0
+          },
+          "top_decile_lift": null,
+          "top_decile_precision": 0.0,
+          "top_decile_size": 1
+        },
+        "market_only": {
+          "base_rate": 0.0,
+          "evaluated_events": 4,
+          "positive_labels": 0,
+          "precision_at": {
+            "10": 0.0,
+            "25": 0.0,
+            "5": 0.0
+          },
+          "top_decile_lift": null,
+          "top_decile_precision": 0.0,
+          "top_decile_size": 1
+        },
+        "nlp_only": {
+          "base_rate": 0.0,
+          "evaluated_events": 4,
+          "positive_labels": 0,
+          "precision_at": {
+            "10": 0.0,
+            "25": 0.0,
+            "5": 0.0
+          },
+          "top_decile_lift": null,
+          "top_decile_precision": 0.0,
+          "top_decile_size": 1
+        },
+        "rules": {
+          "base_rate": 0.0,
+          "evaluated_events": 4,
+          "positive_labels": 0,
+          "precision_at": {
+            "10": 0.0,
+            "25": 0.0,
+            "5": 0.0
+          },
+          "top_decile_lift": null,
+          "top_decile_precision": 0.0,
+          "top_decile_size": 1
+        }
+      },
+      "fold_index": 3,
+      "period": {
+        "test_end": "2025-07-23 17:56:47",
+        "test_start": "2024-04-09 17:44:39",
+        "train_end": "2024-03-28 19:08:43",
+        "train_start": "2016-02-18 09:05:12"
+      },
+      "test_count": 4,
+      "train_count": 20
+    }
+  ],
+  "generated_at": "2026-04-01T15:05:03+00:00",
+  "overall": {
+    "ablations": [
+      {
+        "comparison_engine": "rules",
+        "delta_precision_at": {
+          "10": 0.0,
+          "25": 0.0,
+          "5": 0.0
+        },
+        "delta_top_decile_lift": -2.0
+      },
+      {
+        "comparison_engine": "nlp_only",
+        "delta_precision_at": {
+          "10": 0.0,
+          "25": 0.0,
+          "5": 0.0
+        },
+        "delta_top_decile_lift": -2.0
+      },
+      {
+        "comparison_engine": "market_only",
+        "delta_precision_at": {
+          "10": 0.0,
+          "25": 0.0,
+          "5": 0.0
+        },
+        "delta_top_decile_lift": 0.0
+      },
+      {
+        "comparison_engine": "anomaly_only",
+        "delta_precision_at": {
+          "10": 0.0,
+          "25": 0.0,
+          "5": 0.0
+        },
+        "delta_top_decile_lift": 0.0
+      }
+    ],
+    "base_rate": 0.5,
+    "engines": {
+      "anomaly_only": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 0.5
+      },
+      "hybrid": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 0.5
+      },
+      "market_only": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 0.5
+      },
+      "nlp_only": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 2.5
+      },
+      "rules": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 2.5
+      }
+    }
+  }
+}

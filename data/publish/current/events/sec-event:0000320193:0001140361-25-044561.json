@@ -2,7 +2,7 @@
   "as_of_date": "2025-12-05",
   "avg_volume_20d": 54166666.666666664,
   "bars_used": 10,
-  "built_at": "2026-03-31 14:36:33",
+  "built_at": "2026-04-01 14:42:10",
   "classifier_backend": "sec_item_rules",
   "directional_alignment": false,
   "event_date": "2025-12-05",
@@ -12,22 +12,36 @@
     "components": {
       "alignment_component": 0.058,
       "impact_score": 0.6,
+      "intraday_component": 0.0,
       "novelty": 1.0,
       "source_quality": 1.0,
       "volume_component": 0.9167
     },
+    "model_stack": {
+      "baseline": "rules",
+      "engine": "rules",
+      "fallback_reason": null,
+      "requested_engine": "rules"
+    },
     "signals": {
       "classifier_backend": "sec_item_rules",
       "novelty_backend": "lexical",
+      "pre_15m_return": null,
       "pre_1d_return": 0.01024955436720143,
+      "pre_240m_return": null,
       "pre_5d_return": 0.030923146884947572,
+      "pre_60m_return": null,
+      "range_pct_60m": null,
+      "realized_vol_60m": null,
       "sentiment_backend": "heuristic",
       "sentiment_label": "neutral",
       "sentiment_score": 0.0,
+      "volume_z_15m": null,
       "volume_z_1d": 3.666829640494633,
-      "volume_z_5d": 0.9432954882390344
+      "volume_z_5d": 0.9432954882390344,
+      "volume_z_60m": null
     },
-    "summary": "Flagged because pre-event 1D return was 1.02%, 5D drift was 3.09%, 1D volume z-score was 3.67, event sentiment was neutral, sentiment score was 0.00, impact prior was 0.60, novelty was 1.00, classification used sec_item_rules, sentiment used heuristic, and novelty used lexical."
+    "summary": "Scored with the rule baseline only. Flagged because pre-event 1D return was 1.02%, 5D drift was 3.09%, 1D volume z-score was 3.67, event sentiment was neutral, sentiment score was 0.00, impact prior was 0.60, novelty was 1.00, classification used sec_item_rules, sentiment used heuristic, and novelty used lexical."
   },
   "first_public_at": "2025-12-05 19:31:42",
   "gap_pct": 0.0008912655971478056,
@@ -48,9 +62,9 @@
   "primary_document": "ef20060722_8k.htm",
   "range_pct_60m": null,
   "realized_vol_60m": null,
-  "rule_score": 0.5895,
+  "rule_score": 0.5407,
   "score_band": "Medium",
-  "scored_at": "2026-03-31 14:37:01",
+  "scored_at": "2026-04-01 14:42:19",
   "sec_items_json": "[\"5.02\"]",
   "sentiment_backend": "heuristic",
   "sentiment_label": "neutral",
@@ -60,7 +74,7 @@
   "source_table": "raw_filings",
   "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000114036125044561/ef20060722_8k.htm",
   "summary": "Apple Inc. disclosed a 8-K filing categorized as executive_change using sec_item_rules. Primary document description: 8-K. SEC items: 5.02.",
-  "suspiciousness_score": 58.95,
+  "suspiciousness_score": 54.07,
   "ticker": "AAPL",
   "timestamp_confidence": "high",
   "title": "8-K",

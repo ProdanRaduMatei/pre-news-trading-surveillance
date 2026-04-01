@@ -1,18 +1,165 @@
 {
-  "ablations": [],
+  "ablations": [
+    {
+      "comparison_engine": "rules",
+      "delta_precision_at": {
+        "10": 0.0,
+        "25": 0.0,
+        "5": 0.0
+      },
+      "delta_top_decile_lift": -2.0
+    },
+    {
+      "comparison_engine": "nlp_only",
+      "delta_precision_at": {
+        "10": 0.0,
+        "25": 0.0,
+        "5": 0.0
+      },
+      "delta_top_decile_lift": -2.0
+    },
+    {
+      "comparison_engine": "market_only",
+      "delta_precision_at": {
+        "10": 0.0,
+        "25": 0.0,
+        "5": 0.0
+      },
+      "delta_top_decile_lift": 0.0
+    },
+    {
+      "comparison_engine": "anomaly_only",
+      "delta_precision_at": {
+        "10": 0.0,
+        "25": 0.0,
+        "5": 0.0
+      },
+      "delta_top_decile_lift": 0.0
+    }
+  ],
   "benchmark": {
-    "contamination": null,
-    "control_labels": 0,
-    "fold_count": 0,
-    "k_values": [],
-    "positive_labels": 0,
-    "ranker_enabled": null,
-    "reviewed_events": 0
+    "contamination": 0.12,
+    "control_labels": 12,
+    "fold_count": 3,
+    "k_values": [
+      5,
+      10,
+      25
+    ],
+    "positive_labels": 12,
+    "ranker_enabled": true,
+    "reviewed_events": 24
   },
-  "generated_at": null,
-  "hybrid": {},
-  "notice": "No published backtest report is currently available. Review benchmark candidates, import labels, and run `pnts run-backtest` to publish evaluation metrics.",
-  "overall": {},
-  "source": {},
-  "status": "pending"
+  "generated_at": "2026-04-01T15:05:03+00:00",
+  "hybrid": {
+    "evaluated_events": 12,
+    "fold_count": 3,
+    "precision_at": {
+      "10": 0.4167,
+      "25": 0.4167,
+      "5": 0.4167
+    },
+    "top_decile_lift": 0.5
+  },
+  "notice": "Metrics are computed on a reviewed benchmark of suspicious versus control events and are intended to measure ranking quality, not legal truth.",
+  "overall": {
+    "ablations": [
+      {
+        "comparison_engine": "rules",
+        "delta_precision_at": {
+          "10": 0.0,
+          "25": 0.0,
+          "5": 0.0
+        },
+        "delta_top_decile_lift": -2.0
+      },
+      {
+        "comparison_engine": "nlp_only",
+        "delta_precision_at": {
+          "10": 0.0,
+          "25": 0.0,
+          "5": 0.0
+        },
+        "delta_top_decile_lift": -2.0
+      },
+      {
+        "comparison_engine": "market_only",
+        "delta_precision_at": {
+          "10": 0.0,
+          "25": 0.0,
+          "5": 0.0
+        },
+        "delta_top_decile_lift": 0.0
+      },
+      {
+        "comparison_engine": "anomaly_only",
+        "delta_precision_at": {
+          "10": 0.0,
+          "25": 0.0,
+          "5": 0.0
+        },
+        "delta_top_decile_lift": 0.0
+      }
+    ],
+    "base_rate": 0.5,
+    "engines": {
+      "anomaly_only": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 0.5
+      },
+      "hybrid": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 0.5
+      },
+      "market_only": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 0.5
+      },
+      "nlp_only": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 2.5
+      },
+      "rules": {
+        "evaluated_events": 12,
+        "fold_count": 3,
+        "precision_at": {
+          "10": 0.4167,
+          "25": 0.4167,
+          "5": 0.4167
+        },
+        "top_decile_lift": 2.5
+      }
+    }
+  },
+  "source": {
+    "finished_at": "2026-04-01 18:05:03",
+    "markdown_report_path": "/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/reports/evaluation/backtest_report_20260401T150503Z.md",
+    "report_path": "/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/reports/evaluation/backtest_report_20260401T150503Z.json",
+    "run_id": "982e147f-ef03-4e8a-b49a-1ec47dbfc696"
+  },
+  "status": "available"
 }

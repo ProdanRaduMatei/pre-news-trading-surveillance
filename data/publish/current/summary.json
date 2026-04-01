@@ -1,82 +1,173 @@
 {
   "event_types": [
     {
-      "average_score": 60.83,
-      "event_count": 2,
+      "average_score": 35.32,
+      "event_count": 720,
       "event_type": "earnings",
-      "peak_score": 62.7
+      "peak_score": 57.82
     },
     {
-      "average_score": 51.83,
-      "event_count": 2,
-      "event_type": "executive_change",
-      "peak_score": 58.95
-    },
-    {
-      "average_score": 53.7,
-      "event_count": 1,
+      "average_score": 28.88,
+      "event_count": 437,
       "event_type": "other",
-      "peak_score": 53.7
+      "peak_score": 48.82
+    },
+    {
+      "average_score": 29.86,
+      "event_count": 399,
+      "event_type": "executive_change",
+      "peak_score": 54.07
+    },
+    {
+      "average_score": 31.72,
+      "event_count": 362,
+      "event_type": "major_business_event",
+      "peak_score": 35.5
+    },
+    {
+      "average_score": 32.23,
+      "event_count": 53,
+      "event_type": "financing",
+      "peak_score": 36.25
+    },
+    {
+      "average_score": 35.23,
+      "event_count": 16,
+      "event_type": "mna",
+      "peak_score": 39.25
+    },
+    {
+      "average_score": 32.5,
+      "event_count": 5,
+      "event_type": "litigation_regulatory",
+      "peak_score": 37.0
     }
   ],
   "overview": {
-    "average_score": 55.8,
-    "coverage_end": "2026-02-24 19:55:58",
-    "coverage_start": "2025-10-30 18:30:35",
+    "average_score": 32.07,
+    "coverage_end": "2026-03-27 18:10:53",
+    "coverage_start": "2015-03-23 10:55:17",
     "high_risk_events": 0,
-    "last_built_at": "2026-03-31 14:36:33",
-    "last_scored_at": "2026-03-31 14:37:01",
-    "low_risk_events": 1,
+    "last_built_at": "2026-04-01 14:42:10",
+    "last_scored_at": "2026-04-01 14:42:19",
+    "low_risk_events": 1988,
     "medium_risk_events": 4,
-    "peak_score": 62.7,
-    "total_events": 5,
-    "tracked_tickers": 1
+    "peak_score": 57.82,
+    "total_events": 1992,
+    "tracked_tickers": 31
   },
   "recent_activity": [
     {
-      "average_score": 62.7,
+      "average_score": 28.0,
       "event_count": 1,
-      "event_day": "2025-10-30 00:00:00"
+      "event_day": "2026-03-09 00:00:00"
     },
     {
-      "average_score": 58.95,
+      "average_score": 37.75,
       "event_count": 1,
-      "event_day": "2025-12-05 00:00:00"
+      "event_day": "2026-03-10 00:00:00"
     },
     {
-      "average_score": 44.7,
+      "average_score": 35.5,
       "event_count": 1,
-      "event_day": "2026-01-02 00:00:00"
+      "event_day": "2026-03-11 00:00:00"
     },
     {
-      "average_score": 58.95,
-      "event_count": 1,
-      "event_day": "2026-01-29 00:00:00"
+      "average_score": 33.5,
+      "event_count": 3,
+      "event_day": "2026-03-12 00:00:00"
     },
     {
-      "average_score": 53.7,
+      "average_score": 27.92,
+      "event_count": 3,
+      "event_day": "2026-03-13 00:00:00"
+    },
+    {
+      "average_score": 29.42,
+      "event_count": 3,
+      "event_day": "2026-03-16 00:00:00"
+    },
+    {
+      "average_score": 26.5,
       "event_count": 1,
-      "event_day": "2026-02-24 00:00:00"
+      "event_day": "2026-03-20 00:00:00"
+    },
+    {
+      "average_score": 32.5,
+      "event_count": 1,
+      "event_day": "2026-03-24 00:00:00"
+    },
+    {
+      "average_score": 35.5,
+      "event_count": 1,
+      "event_day": "2026-03-25 00:00:00"
+    },
+    {
+      "average_score": 25.0,
+      "event_count": 1,
+      "event_day": "2026-03-27 00:00:00"
     }
   ],
   "score_bands": [
     {
-      "average_score": 58.58,
+      "average_score": 53.7,
       "event_count": 4,
       "score_band": "Medium"
     },
     {
-      "average_score": 44.7,
-      "event_count": 1,
+      "average_score": 32.02,
+      "event_count": 1988,
       "score_band": "Low"
     }
   ],
   "top_tickers": [
     {
-      "average_score": 55.8,
-      "event_count": 5,
-      "peak_score": 62.7,
+      "average_score": 34.42,
+      "event_count": 80,
+      "peak_score": 57.82,
       "ticker": "AAPL"
+    },
+    {
+      "average_score": 32.08,
+      "event_count": 80,
+      "peak_score": 39.25,
+      "ticker": "HD"
+    },
+    {
+      "average_score": 34.35,
+      "event_count": 80,
+      "peak_score": 39.25,
+      "ticker": "KODK"
+    },
+    {
+      "average_score": 33.91,
+      "event_count": 80,
+      "peak_score": 39.25,
+      "ticker": "ORCL"
+    },
+    {
+      "average_score": 32.17,
+      "event_count": 80,
+      "peak_score": 37.75,
+      "ticker": "ABBV"
+    },
+    {
+      "average_score": 31.62,
+      "event_count": 80,
+      "peak_score": 37.75,
+      "ticker": "AMD"
+    },
+    {
+      "average_score": 30.93,
+      "event_count": 80,
+      "peak_score": 37.75,
+      "ticker": "CMTL"
+    },
+    {
+      "average_score": 31.99,
+      "event_count": 80,
+      "peak_score": 37.75,
+      "ticker": "COST"
     }
   ]
 }
