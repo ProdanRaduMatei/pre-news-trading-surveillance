@@ -216,6 +216,8 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 The app now includes a polished public dashboard served directly from FastAPI. It provides:
 
 - top-level coverage, score, and freshness metrics
+- public methodology, evaluation, and limitation pages linked directly from the dashboard
+- an evaluation snapshot panel when a reviewed backtest summary has been published
 - breakdowns for score bands, event types, top tickers, and recent activity
 - a filterable ranked event feed
 - offset-based pagination, short-lived cache headers, and basic rate limiting on public API routes
@@ -240,9 +242,13 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 ## Published Snapshot Mode
 
 - The pipeline now produces a public JSON bundle under `data/publish/current`.
-- Published bundles are public-safe by default and apply a delayed visibility window before writing `summary.json`, `events.json`, and detail payloads.
+- Published bundles are public-safe by default and apply a delayed visibility window before writing `summary.json`, `evaluation_summary.json`, `events.json`, and detail payloads.
 - Set `PNTS_API_DATA_SOURCE=published` to make the FastAPI app serve from the published bundle instead of DuckDB.
 - Override the bundle location with `PNTS_PUBLISHED_DATA_DIR=/absolute/path/to/published/bundle`.
+- Or point the deployed app at a remotely hosted bundle with `PNTS_PUBLISHED_DATA_BASE_URL=https://cdn.example.com/pnts/current`.
+- Remote bundle fetching behavior can be tuned with:
+  - `PNTS_REMOTE_PUBLISHED_CACHE_SECONDS=60`
+  - `PNTS_REMOTE_PUBLISHED_TIMEOUT_SECONDS=5`
 - Public serving safeguards are controlled with:
   - `PNTS_PUBLIC_SAFE_MODE=true|false`
   - `PNTS_PUBLIC_DELAY_MINUTES=1440`
@@ -260,7 +266,8 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - The repository is ready for Vercel deployment through the root [app.py](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/app.py) ASGI entrypoint and [vercel.json](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/vercel.json).
 - Recommended production env vars:
   - `PNTS_API_DATA_SOURCE=published`
-  - `PNTS_PUBLISHED_DATA_DIR=/var/task/data/publish/current`
+  - either `PNTS_PUBLISHED_DATA_DIR=/var/task/data/publish/current`
+  - or `PNTS_PUBLISHED_DATA_BASE_URL=https://cdn.example.com/pnts/current`
   - `PNTS_PUBLIC_SAFE_MODE=true`
   - `PNTS_PUBLIC_DELAY_MINUTES=1440`
   - `PNTS_RATE_LIMIT_MAX_REQUESTS=120`
@@ -287,6 +294,7 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - [MVP.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/MVP.md)
 - [ARCHITECTURE.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/ARCHITECTURE.md)
 - [DATA_SCHEMA.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/DATA_SCHEMA.md)
+- [METHODOLOGY.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/METHODOLOGY.md)
 - [MODELING.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/MODELING.md)
 - [EVALUATION.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/EVALUATION.md)
 - [DEPLOYMENT.md](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/docs/DEPLOYMENT.md)

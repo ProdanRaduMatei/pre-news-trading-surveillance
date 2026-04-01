@@ -42,6 +42,7 @@ const elements = {
   tickerChart: document.querySelector("#ticker-chart"),
   activityChart: document.querySelector("#activity-chart"),
   policyBanner: document.querySelector("#public-policy-banner"),
+  evaluationPanel: document.querySelector("#evaluation-panel"),
   resultsMeta: document.querySelector("#results-meta"),
   prevPage: document.querySelector("#prev-page"),
   nextPage: document.querySelector("#next-page"),
@@ -158,11 +159,13 @@ async function loadSummary() {
     renderTopTickers(summary.top_tickers || []);
     renderActivity(summary.recent_activity || []);
     renderPolicy(summary.policy || {});
+    renderEvaluation(summary.evaluation || null);
   } catch (error) {
     renderFailure(elements.scoreBandChart, "Unable to load summary panels.");
     renderFailure(elements.eventTypeChart, "Unable to load event categories.");
     renderFailure(elements.tickerChart, "Unable to load issuer summary.");
     renderFailure(elements.activityChart, "Unable to load recent activity.");
+    renderFailure(elements.evaluationPanel, "Unable to load evaluation status.");
     elements.freshnessPill.textContent = "Summary unavailable";
     elements.policyBanner.innerHTML = `
       <div>
@@ -279,6 +282,58 @@ function renderPolicy(policy) {
       <p class="policy-note">${cutoffLine}</p>
       <p class="policy-note">${escapeHtml(policy.limitation_notice || "")}</p>
     </div>
+  `;
+}
+
+function renderEvaluation(evaluation) {
+  if (!evaluation || evaluation.status !== "available") {
+    elements.evaluationPanel.innerHTML = `
+      <div class="evaluation-pending">
+        <p class="detail-summary">${escapeHtml(
+          evaluation?.notice ||
+            "No published evaluation report is available yet. The review workflow exists, but benchmark labels still need to be curated and published.",
+        )}</p>
+        <div class="hero-actions hero-actions-compact">
+          <a class="button button-secondary" href="/methodology">Methodology</a>
+          <a class="button button-secondary" href="/limitations">Limitations</a>
+          <a class="button button-secondary" href="/evaluation">Evaluation Page</a>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const benchmark = evaluation.benchmark || {};
+  const hybrid = evaluation.hybrid || {};
+  const precisionAt = hybrid.precision_at || {};
+
+  elements.evaluationPanel.innerHTML = `
+    <div class="evaluation-grid">
+      <article class="detail-stat">
+        <span class="detail-label">Reviewed events</span>
+        <strong>${formatInteger(benchmark.reviewed_events)}</strong>
+        <span class="detail-meta">Generated ${escapeHtml(formatDateTime(evaluation.generated_at))}</span>
+      </article>
+      <article class="detail-stat">
+        <span class="detail-label">Precision@10</span>
+        <strong>${formatMetric(precisionAt["10"])}</strong>
+        <span class="detail-meta">Hybrid ranker</span>
+      </article>
+      <article class="detail-stat">
+        <span class="detail-label">Top-decile lift</span>
+        <strong>${formatMetric(hybrid.top_decile_lift)}</strong>
+        <span class="detail-meta">Versus base rate</span>
+      </article>
+      <article class="detail-stat">
+        <span class="detail-label">Fold count</span>
+        <strong>${formatInteger(benchmark.fold_count)}</strong>
+        <span class="detail-meta">Chronological backtest</span>
+      </article>
+    </div>
+    <p class="legend-note">${escapeHtml(
+      evaluation.notice ||
+        "Metrics are reported on reviewed suspicious versus control events and should be interpreted as ranking quality signals.",
+    )}</p>
   `;
 }
 
@@ -662,6 +717,13 @@ function formatPercent(value) {
     return "n/a";
   }
   return `${(Number(value) * 100).toFixed(2)}%`;
+}
+
+function formatMetric(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a";
+  }
+  return Number(value).toFixed(4);
 }
 
 function formatScore(value) {

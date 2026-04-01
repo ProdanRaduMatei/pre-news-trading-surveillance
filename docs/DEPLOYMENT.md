@@ -33,6 +33,7 @@ The repo now supports a single-service public deployment:
 
 - Vercel-hosted `FastAPI` app and dashboard via [app.py](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/app.py)
 - public-safe published bundle serving from `data/publish/current`
+- optional remote published bundle serving from an HTTP-accessible object-storage or CDN URL
 - scheduled refresh pipeline producing delayed bundles
 - optional S3-compatible upload for external distribution or backup
 
@@ -43,6 +44,7 @@ For public launch, publish:
 - delayed refreshes such as T+1 or end-of-day
 - score bands rather than sensational claims
 - explicit methodology and limitations pages
+- an evaluation page or evaluation snapshot that clearly distinguishes reviewed metrics from live scores
 - a disclaimer on every event page
 - rate-limited read-only endpoints with no operational run visibility
 
@@ -88,11 +90,15 @@ The scheduled refresh workflow assumes:
 - refresh config checked into the repo, with secrets injected through environment variables rather than hardcoded in config
 - public app env:
   - `PNTS_API_DATA_SOURCE=published`
-  - `PNTS_PUBLISHED_DATA_DIR=/var/task/data/publish/current`
+  - either `PNTS_PUBLISHED_DATA_DIR=/var/task/data/publish/current`
+  - or `PNTS_PUBLISHED_DATA_BASE_URL=https://cdn.example.com/pnts/current`
   - `PNTS_PUBLIC_SAFE_MODE=true`
   - `PNTS_PUBLIC_DELAY_MINUTES=1440`
   - `PNTS_RATE_LIMIT_MAX_REQUESTS=120`
   - `PNTS_RATE_LIMIT_WINDOW_SECONDS=60`
+  - optional remote bundle tuning:
+    - `PNTS_REMOTE_PUBLISHED_CACHE_SECONDS=60`
+    - `PNTS_REMOTE_PUBLISHED_TIMEOUT_SECONDS=5`
 
 ## Public Data Serving Modes
 
@@ -101,12 +107,13 @@ The FastAPI app can now serve from two backends:
 - `duckdb` mode:
   - reads directly from the local analytical DuckDB
 - `published` mode:
-  - reads from a curated snapshot bundle generated under `data/publish/current` or another mounted path
+  - reads from a curated snapshot bundle generated under `data/publish/current`, another mounted path, or a remote HTTP base URL
 
 Set the deployed app environment like this for published mode:
 
 - `PNTS_API_DATA_SOURCE=published`
-- `PNTS_PUBLISHED_DATA_DIR=/mounted/public/snapshot/path`
+- either `PNTS_PUBLISHED_DATA_DIR=/mounted/public/snapshot/path`
+- or `PNTS_PUBLISHED_DATA_BASE_URL=https://cdn.example.com/pnts/current`
 - `PNTS_PUBLIC_SAFE_MODE=true`
 - `PNTS_PUBLIC_DELAY_MINUTES=1440`
 

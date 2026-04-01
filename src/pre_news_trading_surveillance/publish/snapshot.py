@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import db
+from ..evaluation.public_summary import load_public_evaluation_summary
 from ..serve_policy import ServePolicy
 
 
@@ -13,6 +14,7 @@ from ..serve_policy import ServePolicy
 class SnapshotBundle:
     manifest: dict[str, object]
     summary: dict[str, object]
+    evaluation_summary: dict[str, object] | None
     events: list[dict[str, object]]
     details: dict[str, dict[str, object]]
 
@@ -43,16 +45,19 @@ def build_snapshot_bundle(
         for event in events
     }
     generated_at = _utc_now_iso()
+    evaluation_summary = load_public_evaluation_summary(db_path)
     manifest = {
         "generated_at": generated_at,
         "events_limit": events_limit,
         "events_count": len(events),
         "format_version": 1,
         "policy": effective_policy.metadata(),
+        "evaluation_status": (evaluation_summary or {}).get("status"),
     }
     return SnapshotBundle(
         manifest=manifest,
         summary=summary,
+        evaluation_summary=evaluation_summary,
         events=events,
         details=details,
     )
@@ -69,6 +74,10 @@ def write_snapshot_bundle(bundle: SnapshotBundle, output_dir: Path) -> Path:
     )
     (output_dir / "summary.json").write_text(
         json.dumps(bundle.summary, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (output_dir / "evaluation_summary.json").write_text(
+        json.dumps(bundle.evaluation_summary or {}, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     (output_dir / "events.json").write_text(
@@ -101,6 +110,13 @@ def load_snapshot_summary(output_dir: Path) -> dict[str, object]:
 
 def load_snapshot_events(output_dir: Path) -> dict[str, object]:
     return json.loads((output_dir / "events.json").read_text(encoding="utf-8"))
+
+
+def load_snapshot_evaluation_summary(output_dir: Path) -> dict[str, object] | None:
+    path = output_dir / "evaluation_summary.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def load_snapshot_event(output_dir: Path, event_id: str) -> dict[str, object] | None:

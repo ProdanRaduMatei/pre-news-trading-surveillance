@@ -1333,6 +1333,7 @@ def cmd_run_backtest(args: argparse.Namespace) -> int:
                 "reviewed_events": len(details),
                 "json_report_path": str(report.json_path),
                 "markdown_report_path": str(report.markdown_path),
+                "benchmark_summary": report.report.get("benchmark", {}),
                 "overall_metrics": report.report.get("overall", {}),
             }
         )
@@ -1369,12 +1370,14 @@ def cmd_publish_snapshot(args: argparse.Namespace) -> int:
         tracker.row_count = len(bundle.events)
         tracker.add_artifact(output_dir / "manifest.json")
         tracker.add_artifact(output_dir / "summary.json")
+        tracker.add_artifact(output_dir / "evaluation_summary.json")
         tracker.add_artifact(output_dir / "events.json")
         tracker.metadata.update(
             {
                 "output_dir": str(output_dir),
                 "manifest_generated_at": bundle.manifest["generated_at"],
                 "policy": bundle.manifest.get("policy", {}),
+                "evaluation_status": bundle.manifest.get("evaluation_status"),
                 "upstream_runs": _lineage_snapshot(paths.db_path, ["score_events"]),
             }
         )

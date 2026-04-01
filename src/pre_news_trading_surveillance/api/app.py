@@ -10,9 +10,11 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import db
-from ..publish.store import PublishedSnapshotStore
-from ..serve_policy import ServePolicy, policy_from_env
+from ..evaluation.public_summary import load_public_evaluation_summary
+from ..publish.store import PublishedSnapshotStore, RemotePublishedSnapshotStore
+from ..serve_policy import ServePolicy, parse_datetime, policy_from_env
 from ..settings import default_paths
+from ..ui.docs import render_markdown_page
 from .rate_limit import InMemoryRateLimiter, config_from_env
 
 UI_PACKAGE = "pre_news_trading_surveillance.ui"
@@ -78,6 +80,87 @@ def dashboard() -> HTMLResponse:
     return HTMLResponse(index_html)
 
 
+@app.get("/methodology", include_in_schema=False)
+def methodology_page() -> HTMLResponse:
+    paths = default_paths()
+    return HTMLResponse(
+        render_markdown_page(
+            title="Methodology",
+            eyebrow="Research Methodology",
+            intro=(
+                "How the platform builds official events, computes market anomalies, and serves a "
+                "public-safe ranking surface."
+            ),
+            markdown_text=_load_doc_markdown(paths.docs_dir / "METHODOLOGY.md"),
+            actions=[
+                ("/", "Back to Dashboard"),
+                ("/evaluation", "View Evaluation"),
+                ("/limitations", "View Limitations"),
+            ],
+            side_panel_title="Product boundary",
+            side_panel_body=(
+                "This product ranks unusual public-data patterns around official events. It does not "
+                "identify traders or establish legal wrongdoing."
+            ),
+        )
+    )
+
+
+@app.get("/limitations", include_in_schema=False)
+def limitations_page() -> HTMLResponse:
+    paths = default_paths()
+    return HTMLResponse(
+        render_markdown_page(
+            title="Risk and Limitations",
+            eyebrow="Research Limitations",
+            intro=(
+                "The major product, data, and interpretation boundaries users should understand before "
+                "acting on any ranked event."
+            ),
+            markdown_text=_load_doc_markdown(paths.docs_dir / "RISK_AND_LIMITATIONS.md"),
+            actions=[
+                ("/", "Back to Dashboard"),
+                ("/methodology", "View Methodology"),
+                ("/evaluation", "View Evaluation"),
+            ],
+            side_panel_title="Interpretation caution",
+            side_panel_body=(
+                "A high score indicates a stronger research signal for review. It is not proof of insider "
+                "trading, misconduct, or a complete explanation of what happened."
+            ),
+        )
+    )
+
+
+@app.get("/evaluation", include_in_schema=False)
+def evaluation_page() -> HTMLResponse:
+    paths = default_paths()
+    store = _published_store(paths)
+    evaluation = _evaluation_summary(paths, store)
+    return HTMLResponse(
+        render_markdown_page(
+            title="Evaluation",
+            eyebrow="Model Evaluation",
+            intro=(
+                "How the ranking stack is benchmarked, what the reported metrics mean, and how much "
+                "reviewed evidence is currently behind the published system."
+            ),
+            markdown_text=_load_doc_markdown(paths.docs_dir / "EVALUATION.md"),
+            actions=[
+                ("/", "Back to Dashboard"),
+                ("/methodology", "View Methodology"),
+                ("/limitations", "View Limitations"),
+            ],
+            side_panel_title="Evaluation posture",
+            side_panel_body=(
+                "The goal is ranking quality on reviewed historical events. These metrics are not claims "
+                "about criminal truth and should be read as surveillance performance measures."
+            ),
+            extra_html=_build_evaluation_page_summary(evaluation),
+        )
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -100,9 +183,20 @@ def summary() -> dict[str, object]:
 
     payload["api"] = {"name": app.title, "version": app.version}
     payload["policy"] = policy.metadata()
+    payload["evaluation"] = _evaluation_summary(paths, store)
     if manifest is not None:
         payload["manifest"] = manifest
     return payload
+
+
+@app.get("/evaluation/summary")
+def evaluation_summary() -> dict[str, object]:
+    paths = default_paths()
+    store = _published_store(paths)
+    return {
+        "evaluation": _evaluation_summary(paths, store),
+        "policy": _serve_policy().metadata(),
+    }
 
 
 @app.get("/events")
@@ -215,6 +309,18 @@ def _data_source_mode() -> str:
 def _published_store(paths) -> PublishedSnapshotStore | None:
     if _data_source_mode() != "published":
         return None
+    base_url = os.getenv("PNTS_PUBLISHED_DATA_BASE_URL", "").strip()
+    if base_url:
+        store = RemotePublishedSnapshotStore(
+            base_url=base_url,
+            cache_ttl_seconds=max(int(os.getenv("PNTS_REMOTE_PUBLISHED_CACHE_SECONDS", "60")), 0),
+            timeout_seconds=max(float(os.getenv("PNTS_REMOTE_PUBLISHED_TIMEOUT_SECONDS", "5")), 0.5),
+        )
+        if not store.is_available():
+            raise RuntimeError(
+                f"Published snapshot mode is enabled but no manifest could be loaded from {base_url}."
+            )
+        return store
     root = Path(os.getenv("PNTS_PUBLISHED_DATA_DIR", str(paths.publish_dir / "current")))
     store = PublishedSnapshotStore(root)
     if not store.is_available():
@@ -226,6 +332,107 @@ def _published_store(paths) -> PublishedSnapshotStore | None:
 
 def _serve_policy() -> ServePolicy:
     return policy_from_env(data_source_mode=_data_source_mode())
+
+
+def _evaluation_summary(
+    paths,
+    store: PublishedSnapshotStore | RemotePublishedSnapshotStore | None,
+) -> dict[str, object]:
+    if store is not None:
+        return store.evaluation_summary() or {
+            "status": "pending",
+            "notice": "No published evaluation summary is bundled with the current snapshot.",
+            "benchmark": {},
+            "overall": {},
+            "hybrid": {},
+            "ablations": [],
+            "source": {},
+            "generated_at": None,
+        }
+    return load_public_evaluation_summary(paths.db_path)
+
+
+def _load_doc_markdown(path: Path) -> str:
+    if path.exists():
+        return path.read_text(encoding="utf-8")
+    fallback = Path(__file__).resolve().parents[3] / "docs" / path.name
+    return fallback.read_text(encoding="utf-8")
+
+
+def _build_evaluation_page_summary(evaluation: dict[str, object]) -> str:
+    benchmark = dict(evaluation.get("benchmark") or {})
+    hybrid = dict(evaluation.get("hybrid") or {})
+    precision_at = dict(hybrid.get("precision_at") or {})
+    generated_at = evaluation.get("generated_at")
+    if evaluation.get("status") != "available":
+        return f"""
+        <section class="panel reveal">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">Evaluation Status</p>
+              <h2>Reviewed benchmark not yet published</h2>
+            </div>
+          </div>
+          <p class="panel-caption">{evaluation.get("notice") or "Evaluation results are pending."}</p>
+        </section>
+        """
+    return f"""
+    <section class="insight-grid reveal">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="panel-kicker">Benchmark Coverage</p>
+            <h2>{_format_int(benchmark.get("reviewed_events"))} reviewed events</h2>
+          </div>
+          <p class="panel-caption">Generated { _format_datetime(str(generated_at or '')) }</p>
+        </div>
+        <div class="evaluation-grid">
+          <article class="detail-stat">
+            <span class="detail-label">Suspicious labels</span>
+            <strong>{_format_int(benchmark.get("positive_labels"))}</strong>
+          </article>
+          <article class="detail-stat">
+            <span class="detail-label">Control labels</span>
+            <strong>{_format_int(benchmark.get("control_labels"))}</strong>
+          </article>
+          <article class="detail-stat">
+            <span class="detail-label">Chronological folds</span>
+            <strong>{_format_int(benchmark.get("fold_count"))}</strong>
+          </article>
+          <article class="detail-stat">
+            <span class="detail-label">Hybrid top-decile lift</span>
+            <strong>{_format_metric(hybrid.get("top_decile_lift"))}</strong>
+          </article>
+        </div>
+      </article>
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <p class="panel-kicker">Hybrid Metrics</p>
+            <h2>Ranking quality snapshot</h2>
+          </div>
+        </div>
+        <div class="evaluation-grid">
+          <article class="detail-stat">
+            <span class="detail-label">Precision@5</span>
+            <strong>{_format_metric(precision_at.get("5"))}</strong>
+          </article>
+          <article class="detail-stat">
+            <span class="detail-label">Precision@10</span>
+            <strong>{_format_metric(precision_at.get("10"))}</strong>
+          </article>
+          <article class="detail-stat">
+            <span class="detail-label">Precision@25</span>
+            <strong>{_format_metric(precision_at.get("25"))}</strong>
+          </article>
+          <article class="detail-stat">
+            <span class="detail-label">Evaluated events</span>
+            <strong>{_format_int(hybrid.get("evaluated_events"))}</strong>
+          </article>
+        </div>
+      </article>
+    </section>
+    """
 
 
 def _is_rate_limit_exempt(path: str) -> bool:
@@ -248,8 +455,31 @@ def _cache_control_for_path(path: str) -> str:
         return "private, no-store"
     if path.startswith("/static"):
         return "public, max-age=86400, stale-while-revalidate=604800"
+    if path in {"/methodology", "/limitations", "/evaluation"}:
+        return "public, max-age=0, s-maxage=300, stale-while-revalidate=86400"
     if path == "/":
         return "public, max-age=0, s-maxage=60, stale-while-revalidate=300"
-    if path.startswith("/summary") or path.startswith("/events"):
+    if path.startswith("/summary") or path.startswith("/events") or path.startswith("/evaluation/summary"):
         return "public, max-age=0, s-maxage=60, stale-while-revalidate=300"
     return "no-store"
+
+
+def _format_metric(value: object) -> str:
+    try:
+        return f"{float(value):.4f}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_int(value: object) -> str:
+    try:
+        return f"{int(value)}"
+    except (TypeError, ValueError):
+        return "n/a"
+
+
+def _format_datetime(value: str) -> str:
+    parsed = parse_datetime(value)
+    if parsed is None:
+        return "Unavailable"
+    return parsed.strftime("%b %d, %Y %H:%M UTC")

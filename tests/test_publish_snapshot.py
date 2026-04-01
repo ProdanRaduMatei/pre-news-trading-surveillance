@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import types
@@ -14,7 +15,8 @@ from pre_news_trading_surveillance.events.sec_events import build_canonical_even
 from pre_news_trading_surveillance.features.daily import compute_event_market_features  # noqa: E402
 from pre_news_trading_surveillance.ingest.models import RawFilingRecord  # noqa: E402
 from pre_news_trading_surveillance.publish import snapshot  # noqa: E402
-from pre_news_trading_surveillance.publish.store import PublishedSnapshotStore  # noqa: E402
+from pre_news_trading_surveillance.publish import store as publish_store  # noqa: E402
+from pre_news_trading_surveillance.publish.store import PublishedSnapshotStore, RemotePublishedSnapshotStore  # noqa: E402
 from pre_news_trading_surveillance.publish.storage import upload_directory_to_s3  # noqa: E402
 from pre_news_trading_surveillance.scoring.rules import score_event_detail  # noqa: E402
 
@@ -28,27 +30,93 @@ class PublishSnapshotTests(unittest.TestCase):
             db.init_database(db_path=db_path, schema_dir=schema_dir)
 
             self._seed_ranked_event(db_path)
+            self._seed_backtest_run(db_path)
 
             bundle = snapshot.build_snapshot_bundle(db_path=db_path, events_limit=25)
             output_dir = snapshot.write_snapshot_bundle(bundle, root / "publish" / "current")
 
             manifest = snapshot.load_snapshot_manifest(output_dir)
             summary = snapshot.load_snapshot_summary(output_dir)
+            evaluation_summary = snapshot.load_snapshot_evaluation_summary(output_dir)
             events = snapshot.load_snapshot_events(output_dir)
 
             self.assertEqual(manifest["events_count"], 1)
             self.assertFalse(manifest["policy"]["public_safe_mode"])
+            self.assertEqual(manifest["evaluation_status"], "available")
             self.assertEqual(summary["overview"]["total_events"], 1)
+            self.assertEqual(evaluation_summary["status"], "available")
             self.assertEqual(events["count"], 1)
 
             store = PublishedSnapshotStore(output_dir)
             self.assertTrue(store.is_available())
             self.assertEqual(store.summary()["overview"]["tracked_tickers"], 1)
+            self.assertEqual(store.evaluation_summary()["hybrid"]["top_decile_lift"], 2.7)
             self.assertEqual(len(store.list_events(limit=10, offset=0, ticker="AAPL")), 1)
             self.assertEqual(len(store.list_events(limit=10, ticker="MSFT")), 0)
 
             event_id = events["items"][0]["event_id"]
             self.assertEqual(store.get_event(event_id)["ticker"], "AAPL")
+
+    def test_remote_snapshot_store_fetches_and_caches_assets(self) -> None:
+        calls: list[str] = []
+        payloads = {
+            "https://example.com/snapshot/manifest.json": {"generated_at": "2026-04-01T10:00:00+00:00"},
+            "https://example.com/snapshot/summary.json": {"overview": {"total_events": 1}},
+            "https://example.com/snapshot/evaluation_summary.json": {"status": "available", "hybrid": {"top_decile_lift": 2.9}},
+            "https://example.com/snapshot/events.json": {
+                "items": [
+                    {
+                        "event_id": "evt-1",
+                        "ticker": "AAPL",
+                        "event_type": "earnings",
+                        "first_public_at": "2024-01-15T13:30:00+00:00",
+                        "suspiciousness_score": 72.5,
+                    }
+                ]
+            },
+            "https://example.com/snapshot/events/evt-1.json": {
+                "event_id": "evt-1",
+                "ticker": "AAPL",
+                "event_type": "earnings",
+                "first_public_at": "2024-01-15T13:30:00+00:00",
+                "suspiciousness_score": 72.5,
+            },
+        }
+
+        class DummyResponse:
+            def __init__(self, body: str) -> None:
+                self._body = body.encode("utf-8")
+
+            def read(self) -> bytes:
+                return self._body
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+        def fake_urlopen(request, timeout=0):  # noqa: ARG001
+            url = request.full_url
+            calls.append(url)
+            return DummyResponse(json.dumps(payloads[url]))
+
+        publish_store._REMOTE_JSON_CACHE.clear()
+        with patch("pre_news_trading_surveillance.publish.store.urllib_request.urlopen", side_effect=fake_urlopen):
+            store = RemotePublishedSnapshotStore(
+                base_url="https://example.com/snapshot",
+                cache_ttl_seconds=3600,
+            )
+            self.assertTrue(store.is_available())
+            self.assertEqual(store.manifest()["generated_at"], "2026-04-01T10:00:00+00:00")
+            self.assertEqual(store.summary()["overview"]["total_events"], 1)
+            self.assertEqual(store.evaluation_summary()["status"], "available")
+            self.assertEqual(store.count_events(), 1)
+            self.assertEqual(store.list_events(limit=10)[0]["ticker"], "AAPL")
+            self.assertEqual(store.get_event("evt-1")["ticker"], "AAPL")
+            self.assertEqual(store.manifest()["generated_at"], "2026-04-01T10:00:00+00:00")
+
+        self.assertEqual(calls.count("https://example.com/snapshot/manifest.json"), 1)
 
     def test_upload_directory_to_s3_uses_relative_keys(self) -> None:
         uploads: list[tuple[str, str, str]] = []
@@ -107,6 +175,37 @@ class PublishSnapshotTests(unittest.TestCase):
         assert detail is not None
         score = score_event_detail(detail)
         db.upsert_event_scores(db_path, [score])
+
+    def _seed_backtest_run(self, db_path: Path) -> None:
+        db.record_ingestion_run(
+            db_path=db_path,
+            pipeline_name="run_backtest",
+            status="success",
+            row_count=24,
+            metadata={
+                "reviewed_events": 24,
+                "benchmark_summary": {
+                    "reviewed_events": 24,
+                    "positive_labels": 8,
+                    "control_labels": 16,
+                    "fold_count": 3,
+                    "k_values": [5, 10, 25],
+                    "contamination": 0.12,
+                    "ranker_enabled": True,
+                },
+                "overall_metrics": {
+                    "engines": {
+                        "hybrid": {
+                            "precision_at": {"5": 0.8, "10": 0.6, "25": 0.4},
+                            "top_decile_lift": 2.7,
+                            "evaluated_events": 24,
+                        }
+                    },
+                    "ablations": [],
+                },
+            },
+            artifact_paths=["/tmp/backtest_report.json"],
+        )
 
     def _build_bar(self, day: int):
         from pre_news_trading_surveillance.domain import MarketBarDaily

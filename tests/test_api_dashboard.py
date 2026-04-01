@@ -28,6 +28,7 @@ class DashboardApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("Pre-News Trading Surveillance", response.text)
             self.assertIn("Explore Ranked Events", response.text)
+            self.assertIn("Methodology", response.text)
 
             static_response = client.get("/static/app.js")
             self.assertEqual(static_response.status_code, 200)
@@ -43,6 +44,7 @@ class DashboardApiTests(unittest.TestCase):
             self.assertEqual(summary_payload["api"]["name"], "Pre-News Trading Surveillance API")
             self.assertEqual(len(summary_payload["score_bands"]), 1)
             self.assertFalse(summary_payload["policy"]["public_safe_mode"])
+            self.assertEqual(summary_payload["evaluation"]["status"], "available")
 
             events_response = client.get("/events", params={"limit": 10, "offset": 0, "min_score": 0})
             self.assertEqual(events_response.status_code, 200)
@@ -61,9 +63,30 @@ class DashboardApiTests(unittest.TestCase):
             self.assertIn("scored_at", detail_payload)
             self.assertIn("policy", detail_payload)
 
+    def test_public_research_pages_and_evaluation_endpoint_render(self) -> None:
+        with self._build_client() as client:
+            methodology = client.get("/methodology")
+            self.assertEqual(methodology.status_code, 200)
+            self.assertIn("Methodology", methodology.text)
+            self.assertIn("Scoring Stack", methodology.text)
+
+            limitations = client.get("/limitations")
+            self.assertEqual(limitations.status_code, 200)
+            self.assertIn("Risk and Limitations", limitations.text)
+            self.assertIn("proof of wrongdoing", limitations.text)
+
+            evaluation_page = client.get("/evaluation")
+            self.assertEqual(evaluation_page.status_code, 200)
+            self.assertIn("Evaluation", evaluation_page.text)
+            self.assertIn("Hybrid Metrics", evaluation_page.text)
+
+            evaluation_summary = client.get("/evaluation/summary")
+            self.assertEqual(evaluation_summary.status_code, 200)
+            self.assertEqual(evaluation_summary.json()["evaluation"]["status"], "available")
+
     def test_ingestion_runs_endpoint_returns_run_history(self) -> None:
         with self._build_client() as client:
-            response = client.get("/ingestion-runs", params={"limit": 10})
+            response = client.get("/ingestion-runs", params={"limit": 10, "pipeline_name": "seed_data"})
             self.assertEqual(response.status_code, 200)
             payload = response.json()
             self.assertEqual(payload["count"], 1)
@@ -79,6 +102,7 @@ class DashboardApiTests(unittest.TestCase):
 
         db.init_database(db_path=paths.db_path, schema_dir=Path(__file__).resolve().parents[1] / "sql")
         self._seed_ranked_event(paths.db_path)
+        self._seed_backtest_run(paths.db_path)
         bundle = publish_snapshot.build_snapshot_bundle(db_path=paths.db_path, events_limit=25)
         publish_snapshot.write_snapshot_bundle(bundle, paths.publish_dir / "current")
 
@@ -95,6 +119,7 @@ class DashboardApiTests(unittest.TestCase):
                     summary_response = client.get("/summary")
                     self.assertEqual(summary_response.status_code, 200)
                     self.assertEqual(summary_response.json()["overview"]["total_events"], 1)
+                    self.assertEqual(summary_response.json()["evaluation"]["status"], "available")
 
                     events_response = client.get("/events")
                     self.assertEqual(events_response.status_code, 200)
@@ -155,6 +180,7 @@ class DashboardApiTests(unittest.TestCase):
             metadata={"source": "unit-test"},
             artifact_paths=["/tmp/seed.json"],
         )
+        self._seed_backtest_run(paths.db_path)
 
         patcher = patch("pre_news_trading_surveillance.api.app.default_paths", return_value=paths)
         patcher.start()
@@ -208,6 +234,37 @@ class DashboardApiTests(unittest.TestCase):
         assert detail is not None
         score = score_event_detail(detail)
         db.upsert_event_scores(db_path, [score])
+
+    def _seed_backtest_run(self, db_path: Path) -> None:
+        db.record_ingestion_run(
+            db_path=db_path,
+            pipeline_name="run_backtest",
+            status="success",
+            row_count=24,
+            metadata={
+                "reviewed_events": 24,
+                "benchmark_summary": {
+                    "reviewed_events": 24,
+                    "positive_labels": 8,
+                    "control_labels": 16,
+                    "fold_count": 3,
+                    "k_values": [5, 10, 25],
+                    "contamination": 0.12,
+                    "ranker_enabled": True,
+                },
+                "overall_metrics": {
+                    "engines": {
+                        "hybrid": {
+                            "precision_at": {"5": 0.8, "10": 0.6, "25": 0.4},
+                            "top_decile_lift": 2.7,
+                            "evaluated_events": 24,
+                        }
+                    },
+                    "ablations": [],
+                },
+            },
+            artifact_paths=["/tmp/backtest_report.json"],
+        )
 
     def _build_bar(self, day: int):
         from pre_news_trading_surveillance.domain import MarketBarDaily
