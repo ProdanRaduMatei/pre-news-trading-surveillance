@@ -1,0 +1,15 @@
+{
+  "events_count": 5,
+  "events_limit": 250,
+  "format_version": 1,
+  "generated_at": "2026-04-01T13:47:14+00:00",
+  "policy": {
+    "cutoff_at": "2026-03-31T13:47:14+00:00",
+    "data_source_mode": "published",
+    "delay_label": "1 day",
+    "delay_minutes": 1440,
+    "limitation_notice": "Scores reflect unusual pre-disclosure market behavior around official issuer events. They are designed for review prioritization, not accusation or enforcement.",
+    "public_safe_mode": true,
+    "research_notice": "This product is a public-data research and triage tool. It does not identify traders, assert intent, or constitute evidence of illegal insider trading."
+  }
+}

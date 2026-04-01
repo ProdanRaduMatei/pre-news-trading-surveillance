@@ -42,11 +42,14 @@ class DashboardApiTests(unittest.TestCase):
             self.assertEqual(summary_payload["overview"]["tracked_tickers"], 1)
             self.assertEqual(summary_payload["api"]["name"], "Pre-News Trading Surveillance API")
             self.assertEqual(len(summary_payload["score_bands"]), 1)
+            self.assertFalse(summary_payload["policy"]["public_safe_mode"])
 
-            events_response = client.get("/events", params={"limit": 10, "min_score": 0})
+            events_response = client.get("/events", params={"limit": 10, "offset": 0, "min_score": 0})
             self.assertEqual(events_response.status_code, 200)
             events_payload = events_response.json()
             self.assertEqual(events_payload["count"], 1)
+            self.assertEqual(events_payload["total"], 1)
+            self.assertEqual(events_response.headers["Cache-Control"], "public, max-age=0, s-maxage=60, stale-while-revalidate=300")
             event_id = events_payload["items"][0]["event_id"]
 
             detail_response = client.get(f"/events/{event_id}")
@@ -56,6 +59,7 @@ class DashboardApiTests(unittest.TestCase):
             self.assertIn("summary", detail_payload["explanation_payload"])
             self.assertIn("built_at", detail_payload)
             self.assertIn("scored_at", detail_payload)
+            self.assertIn("policy", detail_payload)
 
     def test_ingestion_runs_endpoint_returns_run_history(self) -> None:
         with self._build_client() as client:
@@ -100,9 +104,42 @@ class DashboardApiTests(unittest.TestCase):
                     self.assertEqual(detail_response.status_code, 200)
                     self.assertEqual(detail_response.json()["ticker"], "AAPL")
 
-        tempdir.cleanup()
+            tempdir.cleanup()
 
-    def _build_client(self) -> TestClient:
+    def test_public_safe_mode_hides_events_and_operational_runs(self) -> None:
+        with self._build_client(
+            env={
+                "PNTS_PUBLIC_SAFE_MODE": "true",
+                "PNTS_PUBLIC_DELAY_MINUTES": "2000000",
+            }
+        ) as client:
+            summary_response = client.get("/summary")
+            self.assertEqual(summary_response.status_code, 200)
+            self.assertEqual(summary_response.json()["overview"]["total_events"], 0)
+
+            events_response = client.get("/events", params={"limit": 10})
+            self.assertEqual(events_response.status_code, 200)
+            self.assertEqual(events_response.json()["count"], 0)
+
+            runs_response = client.get("/ingestion-runs", params={"limit": 10})
+            self.assertEqual(runs_response.status_code, 503)
+
+    def test_rate_limiter_blocks_after_configured_threshold(self) -> None:
+        with self._build_client(
+            env={
+                "PNTS_RATE_LIMIT_MAX_REQUESTS": "1",
+                "PNTS_RATE_LIMIT_WINDOW_SECONDS": "60",
+            }
+        ) as client:
+            first = client.get("/summary")
+            self.assertEqual(first.status_code, 200)
+
+            second = client.get("/summary")
+            self.assertEqual(second.status_code, 429)
+            self.assertEqual(second.json()["detail"], "Rate limit exceeded. Please retry after the public cache window rolls over.")
+            self.assertGreaterEqual(int(second.headers["Retry-After"]), 1)
+
+    def _build_client(self, env: dict[str, str] | None = None) -> TestClient:
         tempdir = tempfile.TemporaryDirectory()
         root = Path(tempdir.name)
         paths = default_paths(root=root)
@@ -122,6 +159,21 @@ class DashboardApiTests(unittest.TestCase):
         patcher = patch("pre_news_trading_surveillance.api.app.default_paths", return_value=paths)
         patcher.start()
         self.addCleanup(patcher.stop)
+        env_patcher = patch.dict(
+            os.environ,
+            {
+                "PNTS_API_DATA_SOURCE": "duckdb",
+                "PNTS_PUBLIC_SAFE_MODE": "false",
+                "PNTS_PUBLIC_DELAY_MINUTES": "0",
+                "PNTS_RATE_LIMIT_ENABLED": "true",
+                "PNTS_RATE_LIMIT_MAX_REQUESTS": "120",
+                "PNTS_RATE_LIMIT_WINDOW_SECONDS": "60",
+                **(env or {}),
+            },
+            clear=False,
+        )
+        env_patcher.start()
+        self.addCleanup(env_patcher.stop)
         self.addCleanup(tempdir.cleanup)
         return TestClient(api_app.app)
 

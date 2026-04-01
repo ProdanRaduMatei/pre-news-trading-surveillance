@@ -1,11 +1,21 @@
 const state = {
   events: [],
   eventTypes: [],
+  summary: null,
+  policy: null,
   filters: {
     ticker: "",
     eventType: "",
     minScore: 20,
     limit: 24,
+    offset: 0,
+  },
+  pagination: {
+    total: 0,
+    count: 0,
+    hasMore: false,
+    nextOffset: null,
+    previousOffset: null,
   },
   selectedEventId: null,
 };
@@ -31,13 +41,16 @@ const elements = {
   eventTypeChart: document.querySelector("#event-type-chart"),
   tickerChart: document.querySelector("#ticker-chart"),
   activityChart: document.querySelector("#activity-chart"),
+  policyBanner: document.querySelector("#public-policy-banner"),
+  resultsMeta: document.querySelector("#results-meta"),
+  prevPage: document.querySelector("#prev-page"),
+  nextPage: document.querySelector("#next-page"),
 };
 
 async function init() {
   hydrateStateFromUrl();
   bindEvents();
   syncControls();
-
   await Promise.all([loadSummary(), loadEvents()]);
 }
 
@@ -52,6 +65,7 @@ function bindEvents() {
     state.filters.eventType = elements.eventTypeSelect.value;
     state.filters.minScore = Number(elements.minScoreInput.value);
     state.filters.limit = Number(elements.limitSelect.value);
+    state.filters.offset = 0;
     updateUrl();
     await loadEvents();
   });
@@ -62,9 +76,28 @@ function bindEvents() {
       eventType: "",
       minScore: 20,
       limit: 24,
+      offset: 0,
     };
     state.selectedEventId = null;
     syncControls();
+    updateUrl();
+    await Promise.all([loadSummary(), loadEvents()]);
+  });
+
+  elements.prevPage.addEventListener("click", async () => {
+    if (state.pagination.previousOffset === null) {
+      return;
+    }
+    state.filters.offset = state.pagination.previousOffset;
+    updateUrl();
+    await loadEvents();
+  });
+
+  elements.nextPage.addEventListener("click", async () => {
+    if (state.pagination.nextOffset === null) {
+      return;
+    }
+    state.filters.offset = state.pagination.nextOffset;
     updateUrl();
     await loadEvents();
   });
@@ -76,6 +109,7 @@ function hydrateStateFromUrl() {
   state.filters.eventType = params.get("event_type") || "";
   state.filters.minScore = clampNumber(Number(params.get("min_score") || 20), 0, 100);
   state.filters.limit = clampNumber(Number(params.get("limit") || 24), 12, 48);
+  state.filters.offset = Math.max(0, Number(params.get("offset") || 0));
   state.selectedEventId = params.get("event_id");
 }
 
@@ -101,6 +135,9 @@ function updateUrl() {
   if (state.filters.limit !== 24) {
     params.set("limit", String(state.filters.limit));
   }
+  if (state.filters.offset > 0) {
+    params.set("offset", String(state.filters.offset));
+  }
   if (state.selectedEventId) {
     params.set("event_id", state.selectedEventId);
   }
@@ -111,6 +148,8 @@ function updateUrl() {
 async function loadSummary() {
   try {
     const summary = await fetchJson("/summary");
+    state.summary = summary;
+    state.policy = summary.policy || null;
     state.eventTypes = summary.event_types || [];
     populateEventTypes();
     renderOverview(summary.overview || {});
@@ -118,12 +157,20 @@ async function loadSummary() {
     renderEventTypes(summary.event_types || []);
     renderTopTickers(summary.top_tickers || []);
     renderActivity(summary.recent_activity || []);
+    renderPolicy(summary.policy || {});
   } catch (error) {
     renderFailure(elements.scoreBandChart, "Unable to load summary panels.");
     renderFailure(elements.eventTypeChart, "Unable to load event categories.");
     renderFailure(elements.tickerChart, "Unable to load issuer summary.");
     renderFailure(elements.activityChart, "Unable to load recent activity.");
     elements.freshnessPill.textContent = "Summary unavailable";
+    elements.policyBanner.innerHTML = `
+      <div>
+        <p class="panel-kicker">Public Safeguards</p>
+        <h2>Policy unavailable</h2>
+        <p>The research policy metadata could not be loaded for this session.</p>
+      </div>
+    `;
     console.error(error);
   }
 }
@@ -131,6 +178,7 @@ async function loadSummary() {
 async function loadEvents() {
   const params = new URLSearchParams({
     limit: String(state.filters.limit),
+    offset: String(state.filters.offset),
   });
   if (state.filters.ticker) {
     params.set("ticker", state.filters.ticker);
@@ -143,10 +191,20 @@ async function loadEvents() {
   }
 
   elements.feed.innerHTML = '<div class="empty-state">Loading ranked events...</div>';
+  elements.resultsMeta.textContent = "Loading event feed...";
 
   try {
     const payload = await fetchJson(`/events?${params.toString()}`);
     state.events = payload.items || [];
+    state.pagination = {
+      total: payload.total || 0,
+      count: payload.count || 0,
+      hasMore: Boolean(payload.has_more),
+      nextOffset: payload.next_offset ?? null,
+      previousOffset: payload.previous_offset ?? null,
+    };
+    state.policy = payload.policy || state.policy;
+    renderPagination();
 
     if (!state.events.length) {
       state.selectedEventId = null;
@@ -169,6 +227,7 @@ async function loadEvents() {
   } catch (error) {
     renderFailure(elements.feed, "Unable to load ranked events.");
     renderFailure(elements.detail, "Unable to load event detail.");
+    elements.resultsMeta.textContent = "Event feed unavailable";
     console.error(error);
   }
 }
@@ -201,6 +260,26 @@ function populateEventTypes() {
 
   elements.eventTypeSelect.innerHTML = options.join("");
   elements.eventTypeSelect.value = currentValue;
+}
+
+function renderPolicy(policy) {
+  const isPublicSafe = Boolean(policy.public_safe_mode);
+  const headline = isPublicSafe
+    ? `Public-safe mode is active with a ${escapeHtml(policy.delay_label || "delayed")} visibility window.`
+    : "Public-safe delay is not active for this session.";
+  const cutoffLine = policy.cutoff_at
+    ? `Only events published on or before ${escapeHtml(formatDateTime(policy.cutoff_at))} are visible in this public view.`
+    : "This view is serving the full visible corpus for the current mode.";
+
+  elements.policyBanner.innerHTML = `
+    <div>
+      <p class="panel-kicker">Public Safeguards</p>
+      <h2>${headline}</h2>
+      <p>${escapeHtml(policy.research_notice || "This surface is for research and triage only.")}</p>
+      <p class="policy-note">${cutoffLine}</p>
+      <p class="policy-note">${escapeHtml(policy.limitation_notice || "")}</p>
+    </div>
+  `;
 }
 
 function renderOverview(overview) {
@@ -391,6 +470,9 @@ function renderDetail(event) {
       </div>
       <h3 class="detail-title">${escapeHtml(event.title || "Untitled event")}</h3>
       <p class="detail-summary">${escapeHtml(event.summary || "No event summary is stored for this record.")}</p>
+      <p class="detail-meta policy-note">${escapeHtml(
+        event.policy?.limitation_notice || "Scores are research signals only and do not identify traders or prove misconduct.",
+      )}</p>
     </div>
 
     <div class="detail-grid">
@@ -445,6 +527,22 @@ function renderDetail(event) {
       </article>
     </div>
   `;
+}
+
+function renderPagination() {
+  const start = state.pagination.total === 0 ? 0 : state.filters.offset + 1;
+  const end = state.filters.offset + state.pagination.count;
+  const filterSummary = [
+    state.filters.ticker ? `ticker ${state.filters.ticker}` : null,
+    state.filters.eventType ? formatEventType(state.filters.eventType) : null,
+    state.filters.minScore > 0 ? `score >= ${state.filters.minScore}` : null,
+  ].filter(Boolean);
+
+  elements.resultsMeta.textContent = state.pagination.total
+    ? `Showing ${formatInteger(start)}-${formatInteger(end)} of ${formatInteger(state.pagination.total)} events${filterSummary.length ? ` • ${filterSummary.join(" • ")}` : ""}`
+    : "No events available for the current public filter set.";
+  elements.prevPage.disabled = state.pagination.previousOffset === null;
+  elements.nextPage.disabled = state.pagination.nextOffset === null;
 }
 
 async function fetchJson(url) {

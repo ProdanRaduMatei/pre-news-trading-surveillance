@@ -207,7 +207,8 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - top-level coverage, score, and freshness metrics
 - breakdowns for score bands, event types, top tickers, and recent activity
 - a filterable ranked event feed
-- an event detail rail with scoring explanation, feature values, and source links
+- offset-based pagination, short-lived cache headers, and basic rate limiting on public API routes
+- an event detail rail with scoring explanation, feature values, source links, and public-policy context
 
 ## Scheduled Refresh
 
@@ -228,14 +229,32 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 ## Published Snapshot Mode
 
 - The pipeline now produces a public JSON bundle under `data/publish/current`.
+- Published bundles are public-safe by default and apply a delayed visibility window before writing `summary.json`, `events.json`, and detail payloads.
 - Set `PNTS_API_DATA_SOURCE=published` to make the FastAPI app serve from the published bundle instead of DuckDB.
 - Override the bundle location with `PNTS_PUBLISHED_DATA_DIR=/absolute/path/to/published/bundle`.
+- Public serving safeguards are controlled with:
+  - `PNTS_PUBLIC_SAFE_MODE=true|false`
+  - `PNTS_PUBLIC_DELAY_MINUTES=1440`
+  - `PNTS_RATE_LIMIT_MAX_REQUESTS=120`
+  - `PNTS_RATE_LIMIT_WINDOW_SECONDS=60`
 - Optional object-storage upload is supported through S3-compatible settings in the refresh config and GitHub secrets such as:
   - `PUBLISH_S3_BUCKET`
   - `PUBLISH_S3_REGION`
   - `PUBLISH_S3_ENDPOINT_URL`
   - `AWS_ACCESS_KEY_ID`
   - `AWS_SECRET_ACCESS_KEY`
+
+## Public Deployment
+
+- The repository is ready for Vercel deployment through the root [app.py](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/app.py) ASGI entrypoint and [vercel.json](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/vercel.json).
+- Recommended production env vars:
+  - `PNTS_API_DATA_SOURCE=published`
+  - `PNTS_PUBLISHED_DATA_DIR=/var/task/data/publish/current`
+  - `PNTS_PUBLIC_SAFE_MODE=true`
+  - `PNTS_PUBLIC_DELAY_MINUTES=1440`
+  - `PNTS_RATE_LIMIT_MAX_REQUESTS=120`
+  - `PNTS_RATE_LIMIT_WINDOW_SECONDS=60`
+- The public experience is intentionally framed as delayed research triage. It should not expose `/ingestion-runs` or any internal operator surface.
 
 ## Reproducibility And Run Visibility
 

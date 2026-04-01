@@ -70,6 +70,17 @@
           </article>
         </section>
 
+        <section id="public-policy-banner" class="policy-banner reveal reveal-delay-2" aria-live="polite">
+          <div>
+            <p class="panel-kicker">Public Safeguards</p>
+            <h2>Loading public research policy...</h2>
+            <p>
+              This dashboard intentionally delays visibility and avoids trader identification. It is a
+              research triage surface, not an accusation engine.
+            </p>
+          </div>
+        </section>
+
         <section class="insight-grid">
           <article class="panel reveal">
             <div class="panel-header">
@@ -162,6 +173,14 @@
                   <button id="reset-filters" class="button button-secondary" type="button">Reset</button>
                 </div>
               </form>
+
+              <div class="result-toolbar">
+                <div id="results-meta" class="result-meta">Loading event feed...</div>
+                <div class="pagination-controls">
+                  <button id="prev-page" class="button button-secondary pagination-button" type="button">Previous</button>
+                  <button id="next-page" class="button button-secondary pagination-button" type="button">Next</button>
+                </div>
+              </div>
             </article>
 
             <section id="event-feed" class="event-feed" aria-live="polite">

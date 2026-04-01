@@ -6,12 +6,6 @@ Deploy a public-facing research product with a conservative serving model and a 
 
 ## Recommended MVP Deployment
 
-### Web
-
-- `Next.js` public site
-- static assets on CDN
-- server-side rendering for event detail pages
-
 ### API
 
 - `FastAPI` service
@@ -33,14 +27,14 @@ Deploy a public-facing research product with a conservative serving model and a 
 - config-driven orchestration via `pnts refresh-pipeline`
 - cron or scheduler integration for intraday and full refresh modes
 
-## Reference Cloud Shape
+## Public MVP Shape
 
-One pragmatic MVP setup:
+The repo now supports a single-service public deployment:
 
-- Vercel for the web frontend
-- container-hosted Python API and workers on Render, Fly.io, Railway, or Cloud Run
-- managed Postgres
-- S3-compatible object storage
+- Vercel-hosted `FastAPI` app and dashboard via [app.py](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/app.py)
+- public-safe published bundle serving from `data/publish/current`
+- scheduled refresh pipeline producing delayed bundles
+- optional S3-compatible upload for external distribution or backup
 
 ## Release Model
 
@@ -50,6 +44,7 @@ For public launch, publish:
 - score bands rather than sensational claims
 - explicit methodology and limitations pages
 - a disclaimer on every event page
+- rate-limited read-only endpoints with no operational run visibility
 
 ## CI/CD
 
@@ -91,6 +86,13 @@ The scheduled refresh workflow assumes:
   - `AWS_SECRET_ACCESS_KEY`
   - `AWS_SESSION_TOKEN`
 - refresh config checked into the repo, with secrets injected through environment variables rather than hardcoded in config
+- public app env:
+  - `PNTS_API_DATA_SOURCE=published`
+  - `PNTS_PUBLISHED_DATA_DIR=/var/task/data/publish/current`
+  - `PNTS_PUBLIC_SAFE_MODE=true`
+  - `PNTS_PUBLIC_DELAY_MINUTES=1440`
+  - `PNTS_RATE_LIMIT_MAX_REQUESTS=120`
+  - `PNTS_RATE_LIMIT_WINDOW_SECONDS=60`
 
 ## Public Data Serving Modes
 
@@ -105,6 +107,22 @@ Set the deployed app environment like this for published mode:
 
 - `PNTS_API_DATA_SOURCE=published`
 - `PNTS_PUBLISHED_DATA_DIR=/mounted/public/snapshot/path`
+- `PNTS_PUBLIC_SAFE_MODE=true`
+- `PNTS_PUBLIC_DELAY_MINUTES=1440`
+
+## Vercel Deployment
+
+The repository includes:
+
+- [app.py](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/app.py) as the ASGI entrypoint
+- [vercel.json](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/vercel.json) for function configuration and static cache headers
+
+Recommended deploy posture:
+
+- deploy the app in `published` mode
+- keep public-safe mode enabled
+- ship only delayed bundles to the public-serving path
+- use the GitHub refresh workflow to keep the published bundle fresh
 
 ## Recommended Refresh Split
 

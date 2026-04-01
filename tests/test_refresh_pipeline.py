@@ -57,6 +57,8 @@ novelty_backend = "lexical"
 enabled = true
 output_dir = "data/publish/current"
 max_events = 75
+public_safe_mode = true
+public_delay_minutes = 2880
 s3_enabled = false
 s3_bucket_env = "TEST_PUBLISH_BUCKET"
                 """.strip(),
@@ -82,6 +84,8 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
         self.assertTrue(config.publish.enabled)
         self.assertEqual(config.publish.output_dir, "data/publish/current")
         self.assertEqual(config.publish.max_events, 75)
+        self.assertTrue(config.publish.public_safe_mode)
+        self.assertEqual(config.publish.public_delay_minutes, 2880)
         self.assertEqual(config.publish.s3_bucket_env, "TEST_PUBLISH_BUCKET")
 
     def test_resolve_refresh_steps_supports_modes_and_explicit_override(self) -> None:
@@ -141,6 +145,8 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
                     enabled=True,
                     output_dir="data/publish/current",
                     max_events=25,
+                    public_safe_mode=True,
+                    public_delay_minutes=1440,
                     s3_enabled=False,
                     s3_bucket=None,
                     s3_bucket_env="PUBLISH_S3_BUCKET",

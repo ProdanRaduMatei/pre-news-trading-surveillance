@@ -14,6 +14,7 @@ from .pipeline import refresh as refresh_pipeline
 from .publish import snapshot as publish_snapshot
 from .publish import storage as publish_storage
 from .scoring import anomaly_stack, rules
+from .serve_policy import ServePolicy
 from .settings import default_paths
 
 
@@ -409,6 +410,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=250,
         help="Maximum number of ranked events to include in the published bundle.",
+    )
+    publish_job.add_argument(
+        "--public-safe",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to apply delayed public-safe filtering before writing the bundle.",
+    )
+    publish_job.add_argument(
+        "--public-delay-minutes",
+        type=int,
+        default=1440,
+        help="Visibility delay in minutes for the published bundle when public-safe mode is enabled.",
     )
     publish_job.add_argument(
         "--s3-bucket",
@@ -1103,13 +1116,23 @@ def cmd_publish_snapshot(args: argparse.Namespace) -> int:
     with tracked_ingestion_run(
         paths=paths,
         pipeline_name="publish_snapshot",
-        metadata={"events_limit": args.events_limit},
+        metadata={
+            "events_limit": args.events_limit,
+            "public_safe_mode": args.public_safe,
+            "public_delay_minutes": args.public_delay_minutes,
+        },
         parent_run_id=getattr(args, "parent_run_id", None),
     ) as tracker:
         output_dir = args.output_dir or (paths.publish_dir / "current")
+        policy = ServePolicy(
+            public_safe_mode=bool(args.public_safe),
+            delay_minutes=max(int(args.public_delay_minutes), 0),
+            data_source_mode="published",
+        )
         bundle = publish_snapshot.build_snapshot_bundle(
             db_path=paths.db_path,
             events_limit=args.events_limit,
+            policy=policy,
         )
         publish_snapshot.write_snapshot_bundle(bundle, output_dir)
         tracker.row_count = len(bundle.events)
@@ -1120,6 +1143,7 @@ def cmd_publish_snapshot(args: argparse.Namespace) -> int:
             {
                 "output_dir": str(output_dir),
                 "manifest_generated_at": bundle.manifest["generated_at"],
+                "policy": bundle.manifest.get("policy", {}),
                 "upstream_runs": _lineage_snapshot(paths.db_path, ["score_events"]),
             }
         )

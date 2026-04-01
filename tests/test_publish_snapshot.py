@@ -37,13 +37,14 @@ class PublishSnapshotTests(unittest.TestCase):
             events = snapshot.load_snapshot_events(output_dir)
 
             self.assertEqual(manifest["events_count"], 1)
+            self.assertFalse(manifest["policy"]["public_safe_mode"])
             self.assertEqual(summary["overview"]["total_events"], 1)
             self.assertEqual(events["count"], 1)
 
             store = PublishedSnapshotStore(output_dir)
             self.assertTrue(store.is_available())
             self.assertEqual(store.summary()["overview"]["tracked_tickers"], 1)
-            self.assertEqual(len(store.list_events(limit=10, ticker="AAPL")), 1)
+            self.assertEqual(len(store.list_events(limit=10, offset=0, ticker="AAPL")), 1)
             self.assertEqual(len(store.list_events(limit=10, ticker="MSFT")), 0)
 
             event_id = events["items"][0]["event_id"]

@@ -272,6 +272,34 @@ select {
   font-size: 0.95rem;
 }
 
+.policy-banner {
+  padding: 24px 26px;
+  border: 1px solid rgba(176, 74, 50, 0.16);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(135deg, rgba(176, 74, 50, 0.08), rgba(17, 106, 115, 0.08)),
+    var(--panel-strong);
+  box-shadow: var(--shadow);
+}
+
+.policy-banner h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-size: clamp(1.8rem, 3vw, 2.5rem);
+}
+
+.policy-banner p {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.policy-note {
+  font-size: 0.92rem;
+}
+
 .insight-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -450,6 +478,37 @@ select {
   display: flex;
   align-items: end;
   gap: 12px;
+}
+
+.result-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.result-meta {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.pagination-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.pagination-button {
+  min-width: 118px;
+}
+
+.pagination-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
 }
 
 .event-feed {
@@ -712,6 +771,12 @@ select {
   .filter-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .result-toolbar,
+  .pagination-controls {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .button {

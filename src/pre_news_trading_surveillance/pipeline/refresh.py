@@ -91,6 +91,8 @@ class PublishRefreshConfig:
     enabled: bool
     output_dir: str
     max_events: int
+    public_safe_mode: bool
+    public_delay_minutes: int
     s3_enabled: bool
     s3_bucket: str | None
     s3_bucket_env: str
@@ -181,6 +183,8 @@ def load_refresh_config(config_path: Path) -> RefreshPipelineConfig:
             enabled=bool(publish_payload.get("enabled", True)),
             output_dir=str(publish_payload.get("output_dir", "data/publish/current")),
             max_events=int(publish_payload.get("max_events", 250)),
+            public_safe_mode=bool(publish_payload.get("public_safe_mode", True)),
+            public_delay_minutes=int(publish_payload.get("public_delay_minutes", 1440)),
             s3_enabled=bool(publish_payload.get("s3_enabled", False)),
             s3_bucket=_none_if_blank(publish_payload.get("s3_bucket")),
             s3_bucket_env=str(publish_payload.get("s3_bucket_env", "PUBLISH_S3_BUCKET")),
@@ -358,6 +362,8 @@ def run_refresh_pipeline(
                     Namespace(
                         output_dir=_resolve_publish_output_dir(config.publish.output_dir, paths.root),
                         events_limit=config.publish.max_events,
+                        public_safe=config.publish.public_safe_mode,
+                        public_delay_minutes=config.publish.public_delay_minutes,
                         s3_bucket=_resolve_optional_value(
                             config.publish.s3_bucket,
                             config.publish.s3_bucket_env,

@@ -737,9 +737,11 @@ def load_market_bars_minute(db_path: Path, ticker: str | None = None) -> list[Ma
 def list_ranked_events(
     db_path: Path,
     limit: int = 25,
+    offset: int = 0,
     ticker: str | None = None,
     event_type: str | None = None,
     min_score: float | None = None,
+    max_first_public_at: str | None = None,
 ) -> list[dict[str, object]]:
     duckdb = _require_duckdb()
     query = """
@@ -787,13 +789,52 @@ def list_ranked_events(
     if min_score is not None:
         query += " AND COALESCE(s.suspiciousness_score, 0) >= ?"
         params.append(min_score)
+    if max_first_public_at:
+        query += " AND e.first_public_at <= ?"
+        params.append(max_first_public_at)
 
-    query += " ORDER BY COALESCE(s.suspiciousness_score, 0) DESC, e.first_public_at DESC LIMIT ?"
-    params.append(limit)
+    query += " ORDER BY COALESCE(s.suspiciousness_score, 0) DESC, e.first_public_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
     return _fetch_dict_rows(db_path, query, params)
 
 
-def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
+def count_ranked_events(
+    db_path: Path,
+    *,
+    ticker: str | None = None,
+    event_type: str | None = None,
+    min_score: float | None = None,
+    max_first_public_at: str | None = None,
+) -> int:
+    query = """
+        SELECT COUNT(*)
+        FROM events e
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if ticker:
+        query += " AND e.ticker = ?"
+        params.append(ticker.upper())
+    if event_type:
+        query += " AND e.event_type = ?"
+        params.append(event_type)
+    if min_score is not None:
+        query += " AND COALESCE(s.suspiciousness_score, 0) >= ?"
+        params.append(min_score)
+    if max_first_public_at:
+        query += " AND e.first_public_at <= ?"
+        params.append(max_first_public_at)
+    _columns, rows = _fetch_rows(db_path, query, params)
+    return int(rows[0][0]) if rows else 0
+
+
+def get_ranked_event(
+    db_path: Path,
+    event_id: str,
+    *,
+    max_first_public_at: str | None = None,
+) -> dict[str, object] | None:
     query = """
         SELECT
           e.event_id,
@@ -852,7 +893,11 @@ def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
         LEFT JOIN event_scores s ON e.event_id = s.event_id
         WHERE e.event_id = ?
     """
-    columns, rows = _fetch_rows(db_path, query, [event_id])
+    params: list[object] = [event_id]
+    if max_first_public_at:
+        query += " AND e.first_public_at <= ?"
+        params.append(max_first_public_at)
+    columns, rows = _fetch_rows(db_path, query, params)
     if not rows:
         return None
     return _row_to_dict(columns, rows[0])
@@ -933,10 +978,16 @@ def load_scoring_event_details(
     return _fetch_dict_rows(db_path, query, params)
 
 
-def get_dashboard_summary(db_path: Path) -> dict[str, object]:
+def get_dashboard_summary(db_path: Path, *, max_first_public_at: str | None = None) -> dict[str, object]:
+    where_clause = "WHERE 1 = 1"
+    params: list[object] = []
+    if max_first_public_at:
+        where_clause += " AND e.first_public_at <= ?"
+        params.append(max_first_public_at)
+
     overview = _fetch_dict_rows(
         db_path,
-        """
+        f"""
         SELECT
           COUNT(*) AS total_events,
           COUNT(DISTINCT e.ticker) AS tracked_tickers,
@@ -951,18 +1002,21 @@ def get_dashboard_summary(db_path: Path) -> dict[str, object]:
           CAST(MAX(s.scored_at) AS VARCHAR) AS last_scored_at
         FROM events e
         LEFT JOIN event_scores s ON e.event_id = s.event_id
+        {where_clause}
         """,
+        params,
     )[0]
 
     score_bands = _fetch_dict_rows(
         db_path,
-        """
+        f"""
         SELECT
           COALESCE(s.score_band, 'Unscored') AS score_band,
           COUNT(*) AS event_count,
           ROUND(COALESCE(AVG(s.suspiciousness_score), 0), 2) AS average_score
         FROM events e
         LEFT JOIN event_scores s ON e.event_id = s.event_id
+        {where_clause}
         GROUP BY 1
         ORDER BY CASE COALESCE(s.score_band, 'Unscored')
           WHEN 'High' THEN 1
@@ -971,11 +1025,12 @@ def get_dashboard_summary(db_path: Path) -> dict[str, object]:
           ELSE 4
         END
         """,
+        params,
     )
 
     event_types = _fetch_dict_rows(
         db_path,
-        """
+        f"""
         SELECT
           e.event_type,
           COUNT(*) AS event_count,
@@ -983,15 +1038,17 @@ def get_dashboard_summary(db_path: Path) -> dict[str, object]:
           ROUND(COALESCE(MAX(s.suspiciousness_score), 0), 2) AS peak_score
         FROM events e
         LEFT JOIN event_scores s ON e.event_id = s.event_id
+        {where_clause}
         GROUP BY 1
         ORDER BY event_count DESC, average_score DESC, e.event_type ASC
         LIMIT 8
         """,
+        params,
     )
 
     top_tickers = _fetch_dict_rows(
         db_path,
-        """
+        f"""
         SELECT
           e.ticker,
           COUNT(*) AS event_count,
@@ -999,25 +1056,29 @@ def get_dashboard_summary(db_path: Path) -> dict[str, object]:
           ROUND(COALESCE(MAX(s.suspiciousness_score), 0), 2) AS peak_score
         FROM events e
         LEFT JOIN event_scores s ON e.event_id = s.event_id
+        {where_clause}
         GROUP BY 1
         ORDER BY peak_score DESC, event_count DESC, e.ticker ASC
         LIMIT 8
         """,
+        params,
     )
 
     recent_activity = _fetch_dict_rows(
         db_path,
-        """
+        f"""
         SELECT
           CAST(DATE_TRUNC('day', e.first_public_at) AS VARCHAR) AS event_day,
           COUNT(*) AS event_count,
           ROUND(COALESCE(AVG(s.suspiciousness_score), 0), 2) AS average_score
         FROM events e
         LEFT JOIN event_scores s ON e.event_id = s.event_id
+        {where_clause}
         GROUP BY 1
         ORDER BY event_day DESC
         LIMIT 10
         """,
+        params,
     )
     recent_activity.reverse()
 

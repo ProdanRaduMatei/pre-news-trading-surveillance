@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import db
+from ..serve_policy import ServePolicy
 
 
 @dataclass(frozen=True)
@@ -20,15 +21,25 @@ def build_snapshot_bundle(
     *,
     db_path: Path,
     events_limit: int = 250,
+    policy: ServePolicy | None = None,
 ) -> SnapshotBundle:
-    summary = db.get_dashboard_summary(db_path)
+    effective_policy = policy or ServePolicy()
+    visible_before = effective_policy.cutoff_at_iso()
+    summary = db.get_dashboard_summary(db_path, max_first_public_at=visible_before)
     events = db.list_ranked_events(
         db_path=db_path,
         limit=events_limit,
+        offset=0,
         min_score=0,
+        max_first_public_at=visible_before,
     )
     details = {
-        str(event["event_id"]): db.get_ranked_event(db_path, str(event["event_id"])) or {}
+        str(event["event_id"]): db.get_ranked_event(
+            db_path,
+            str(event["event_id"]),
+            max_first_public_at=visible_before,
+        )
+        or {}
         for event in events
     }
     generated_at = _utc_now_iso()
@@ -37,6 +48,7 @@ def build_snapshot_bundle(
         "events_limit": events_limit,
         "events_count": len(events),
         "format_version": 1,
+        "policy": effective_policy.metadata(),
     }
     return SnapshotBundle(
         manifest=manifest,
@@ -64,6 +76,7 @@ def write_snapshot_bundle(bundle: SnapshotBundle, output_dir: Path) -> Path:
             {
                 "items": bundle.events,
                 "count": len(bundle.events),
+                "policy": bundle.manifest.get("policy", {}),
             },
             indent=2,
             sort_keys=True,
