@@ -61,6 +61,12 @@ For optional fully local NLP backends such as FinBERT sentiment and embedding-ba
 pip install -e .[nlp]
 ```
 
+For the anomaly-stack scorer with `IsolationForest` and `LightGBM`:
+
+```bash
+pip install -e .[ml]
+```
+
 Initialize the local database and directory structure:
 
 ```bash
@@ -119,6 +125,13 @@ pnts compute-minute-features
 pnts score-events
 ```
 
+Train the anomaly stack and then score with the hybrid engine:
+
+```bash
+pnts train-model-stack --min-samples 12
+pnts score-events --engine hybrid
+```
+
 Inspect recent ingestion, feature, scoring, and publish runs:
 
 ```bash
@@ -171,6 +184,7 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - `pnts build-sec-events --sentiment-backend heuristic|finbert --novelty-backend lexical|sentence-transformers`
 - `pnts compute-daily-features`
 - `pnts compute-minute-features`
+- `pnts train-model-stack --min-samples 12`
 - `pnts score-events`
 - `pnts list-ingestion-runs --limit 20`
 - `pnts publish-snapshot --output-dir data/publish/current`
@@ -228,6 +242,7 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - Every tracked command now writes a `running` -> `success|failed` lifecycle row into `ingestion_runs`.
 - Run metadata includes retry counts, upstream lineage, and immutable artifact paths for raw ingests, feature snapshots, scoring inputs, and score outputs.
 - The API exposes internal run visibility at `/ingestion-runs` when serving directly from DuckDB.
+- Trained anomaly-stack artifacts live under `data/models/scoring/current/` and include a `manifest.json` plus a pickled model bundle.
 
 ## Core Docs
 

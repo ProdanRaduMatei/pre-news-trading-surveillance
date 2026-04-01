@@ -24,6 +24,10 @@ nlp = [
   "sentence-transformers>=3.0.0",
   "transformers>=4.44.0",
 ]
+ml = [
+  "scikit-learn>=1.6.0",
+  "lightgbm>=4.6.0",
+]
 publish = [
   "boto3>=1.35.0",
 ]

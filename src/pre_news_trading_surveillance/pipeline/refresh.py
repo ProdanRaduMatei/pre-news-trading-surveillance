@@ -343,7 +343,12 @@ def run_refresh_pipeline(
             elif step == "score":
                 _run_step(
                     cli_module.cmd_score_events,
-                    Namespace(ticker=None, parent_run_id=refresh_run_id),
+                    Namespace(
+                        ticker=None,
+                        engine="auto",
+                        model_dir=paths.models_dir / "scoring" / "current",
+                        parent_run_id=refresh_run_id,
+                    ),
                 )
             elif step == "publish":
                 if not config.publish.enabled:

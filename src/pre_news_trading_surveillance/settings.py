@@ -17,6 +17,7 @@ class ProjectPaths:
     bronze_dir: Path
     silver_dir: Path
     gold_dir: Path
+    models_dir: Path
     publish_dir: Path
     db_path: Path
 
@@ -32,6 +33,9 @@ class ProjectPaths:
             self.bronze_dir,
             self.silver_dir,
             self.gold_dir,
+            self.models_dir,
+            self.models_dir / "scoring",
+            self.models_dir / "scoring" / "current",
             self.publish_dir,
             self.publish_dir / "current",
             self.raw_dir / "sec",
@@ -70,6 +74,7 @@ def default_paths(root: Path | None = None) -> ProjectPaths:
         bronze_dir=data_dir / "bronze",
         silver_dir=data_dir / "silver",
         gold_dir=data_dir / "gold",
+        models_dir=data_dir / "models",
         publish_dir=data_dir / "publish",
         db_path=data_dir / "gold" / "pnts.duckdb",
     )

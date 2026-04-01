@@ -858,6 +858,81 @@ def get_ranked_event(db_path: Path, event_id: str) -> dict[str, object] | None:
     return _row_to_dict(columns, rows[0])
 
 
+def load_scoring_event_details(
+    db_path: Path,
+    *,
+    ticker: str | None = None,
+    limit: int | None = None,
+) -> list[dict[str, object]]:
+    query = """
+        SELECT
+          e.event_id,
+          e.source_event_id,
+          e.source_table,
+          e.ticker,
+          e.issuer_name,
+          CAST(e.first_public_at AS VARCHAR) AS first_public_at,
+          CAST(e.event_date AS VARCHAR) AS event_date,
+          e.event_type,
+          e.sentiment_label,
+          e.sentiment_score,
+          e.title,
+          e.summary,
+          e.source_url,
+          e.primary_document,
+          e.sec_items_json,
+          e.official_source_flag,
+          e.timestamp_confidence,
+          e.classifier_backend,
+          e.sentiment_backend,
+          e.novelty_backend,
+          e.source_quality,
+          e.novelty,
+          e.impact_score,
+          CAST(e.built_at AS VARCHAR) AS built_at,
+          f.pre_1d_return,
+          f.pre_5d_return,
+          f.pre_20d_return,
+          CAST(f.as_of_date AS VARCHAR) AS as_of_date,
+          f.volume_z_1d,
+          f.volume_z_5d,
+          f.volatility_20d,
+          f.gap_pct,
+          f.avg_volume_20d,
+          f.bars_used,
+          fm.pre_15m_return,
+          fm.pre_60m_return,
+          fm.pre_240m_return,
+          CAST(fm.as_of_timestamp AS VARCHAR) AS minute_as_of_timestamp,
+          fm.volume_z_15m,
+          fm.volume_z_60m,
+          fm.realized_vol_60m,
+          fm.range_pct_60m,
+          CAST(fm.last_bar_at AS VARCHAR) AS last_bar_at,
+          fm.bars_used AS minute_bars_used,
+          s.rule_score,
+          s.suspiciousness_score,
+          s.score_band,
+          s.directional_alignment,
+          s.explanation_payload,
+          CAST(s.scored_at AS VARCHAR) AS scored_at
+        FROM events e
+        LEFT JOIN event_market_features_daily f ON e.event_id = f.event_id
+        LEFT JOIN event_market_features_minute fm ON e.event_id = fm.event_id
+        LEFT JOIN event_scores s ON e.event_id = s.event_id
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if ticker:
+        query += " AND e.ticker = ?"
+        params.append(ticker.upper())
+    query += " ORDER BY e.first_public_at DESC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    return _fetch_dict_rows(db_path, query, params)
+
+
 def get_dashboard_summary(db_path: Path) -> dict[str, object]:
     overview = _fetch_dict_rows(
         db_path,

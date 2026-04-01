@@ -13,7 +13,7 @@ from .ingest import issuer_releases, market, sec
 from .pipeline import refresh as refresh_pipeline
 from .publish import snapshot as publish_snapshot
 from .publish import storage as publish_storage
-from .scoring import rules
+from .scoring import anomaly_stack, rules
 from .settings import default_paths
 
 
@@ -345,11 +345,54 @@ def build_parser() -> argparse.ArgumentParser:
 
     score_events = subparsers.add_parser(
         "score-events",
-        help="Score canonical events using the rule-based ranking engine.",
+        help="Score canonical events using rules or the hybrid anomaly stack.",
     )
     score_events.add_argument(
         "--ticker",
         help="Optional single-ticker filter.",
+    )
+    score_events.add_argument(
+        "--engine",
+        choices=["auto", "rules", "hybrid"],
+        default="auto",
+        help="Scoring engine. `auto` uses trained models when available and falls back to rules otherwise.",
+    )
+    score_events.add_argument(
+        "--model-dir",
+        type=Path,
+        help="Optional model directory override. Defaults to data/models/scoring/current.",
+    )
+
+    train_model_stack = subparsers.add_parser(
+        "train-model-stack",
+        help="Train the IsolationForest plus optional LightGBM ranker on engineered event features.",
+    )
+    train_model_stack.add_argument(
+        "--ticker",
+        help="Optional single-ticker filter.",
+    )
+    train_model_stack.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Output directory for trained model artifacts. Defaults to data/models/scoring/current.",
+    )
+    train_model_stack.add_argument(
+        "--contamination",
+        type=float,
+        default=0.12,
+        help="IsolationForest contamination parameter.",
+    )
+    train_model_stack.add_argument(
+        "--min-samples",
+        type=int,
+        default=12,
+        help="Minimum events required before training will run.",
+    )
+    train_model_stack.add_argument(
+        "--use-ranker",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to train the LightGBM ranker on top of the anomaly features.",
     )
 
     publish_job = subparsers.add_parser(
@@ -951,24 +994,29 @@ def cmd_compute_minute_features(args: argparse.Namespace) -> int:
 def cmd_score_events(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
+    engine = getattr(args, "engine", "auto")
+    model_dir = getattr(args, "model_dir", None) or (paths.models_dir / "scoring" / "current")
     with tracked_ingestion_run(
         paths=paths,
         pipeline_name="score_events",
-        metadata={"ticker": args.ticker},
+        metadata={
+            "ticker": args.ticker,
+            "engine": engine,
+            "model_dir": str(model_dir),
+        },
         parent_run_id=getattr(args, "parent_run_id", None),
     ) as tracker:
-        events = db.load_events(paths.db_path, ticker=args.ticker)
-        details = []
-        for event in events:
-            detail = db.get_ranked_event(paths.db_path, event.event_id)
-            if detail is not None:
-                details.append(detail)
+        details = db.load_scoring_event_details(paths.db_path, ticker=args.ticker)
         inputs_snapshot_path = artifacts.write_ndjson_snapshot(
             paths.silver_dir / "scoring",
             name_prefix="score_inputs",
             rows=details,
         )
-        scores = [rules.score_event_detail(detail) for detail in details]
+        scores, scoring_metadata = anomaly_stack.score_event_details(
+            details,
+            engine=engine,
+            model_dir=model_dir,
+        )
         outputs_snapshot_path = artifacts.write_ndjson_snapshot(
             paths.silver_dir / "scoring",
             name_prefix="event_scores",
@@ -980,10 +1028,11 @@ def cmd_score_events(args: argparse.Namespace) -> int:
         tracker.add_artifact(outputs_snapshot_path)
         tracker.metadata.update(
             {
-                "events_loaded": len(events),
+                "events_loaded": len(details),
                 "score_inputs": len(details),
                 "inputs_snapshot_path": str(inputs_snapshot_path),
                 "outputs_snapshot_path": str(outputs_snapshot_path),
+                "scoring_metadata": scoring_metadata,
                 "upstream_runs": _lineage_snapshot(
                     paths.db_path,
                     [
@@ -995,6 +1044,56 @@ def cmd_score_events(args: argparse.Namespace) -> int:
             }
         )
     print(f"Scored {inserted} events")
+    return 0
+
+
+def cmd_train_model_stack(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    output_dir = args.output_dir or (paths.models_dir / "scoring" / "current")
+    with tracked_ingestion_run(
+        paths=paths,
+        pipeline_name="train_model_stack",
+        metadata={
+            "ticker": args.ticker,
+            "output_dir": str(output_dir),
+            "contamination": args.contamination,
+            "min_samples": args.min_samples,
+            "use_ranker": args.use_ranker,
+        },
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        details = db.load_scoring_event_details(paths.db_path, ticker=args.ticker)
+        inputs_snapshot_path = artifacts.write_ndjson_snapshot(
+            paths.silver_dir / "scoring",
+            name_prefix="training_inputs",
+            rows=details,
+        )
+        trained = anomaly_stack.train_model_stack(
+            details,
+            output_dir=output_dir,
+            contamination=args.contamination,
+            min_samples=args.min_samples,
+            enable_ranker=args.use_ranker,
+        )
+        tracker.row_count = len(details)
+        tracker.add_artifact(inputs_snapshot_path)
+        tracker.add_artifact(trained.bundle_path)
+        tracker.add_artifact(trained.manifest_path)
+        tracker.metadata.update(
+            {
+                "training_samples": len(details),
+                "inputs_snapshot_path": str(inputs_snapshot_path),
+                "model_manifest": trained.manifest,
+                "upstream_runs": _lineage_snapshot(
+                    paths.db_path,
+                    ["compute_daily_features", "compute_minute_features", "build_sec_events"],
+                ),
+            }
+        )
+    print(f"Trained anomaly stack on {len(details)} events")
+    print(f"Model bundle: {trained.bundle_path}")
+    print(f"Manifest: {trained.manifest_path}")
     return 0
 
 
@@ -1149,6 +1248,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_compute_daily_features(args)
     if args.command == "compute-minute-features":
         return cmd_compute_minute_features(args)
+    if args.command == "train-model-stack":
+        return cmd_train_model_stack(args)
     if args.command == "score-events":
         return cmd_score_events(args)
     if args.command == "publish-snapshot":
