@@ -112,6 +112,12 @@ pnts compute-minute-features
 pnts score-events
 ```
 
+Inspect recent ingestion, feature, scoring, and publish runs:
+
+```bash
+pnts list-ingestion-runs --limit 20
+```
+
 Run the orchestrated refresh pipeline from config:
 
 ```bash
@@ -158,6 +164,7 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - `pnts compute-daily-features`
 - `pnts compute-minute-features`
 - `pnts score-events`
+- `pnts list-ingestion-runs --limit 20`
 - `pnts publish-snapshot --output-dir data/publish/current`
 - `pnts refresh-pipeline --config configs/refresh_pipeline.example.toml --mode full|intraday`
 - `pnts serve-api`
@@ -167,6 +174,8 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - Alpha Vantage daily bars are available through the `TIME_SERIES_DAILY` endpoint.
 - Alpha Vantage intraday bars are exposed through `TIME_SERIES_INTRADAY`.
 - The repo stores raw provider CSV snapshots under `data/raw/market/alpha_vantage/` before loading normalized rows into DuckDB.
+- Local CSV imports are copied into `data/raw/market/csv/` so feature and score batches remain reproducible even when the original source file changes.
+- SEC and provider pulls now use bounded retry logic with rate-limit awareness, and each run records attempts, artifacts, and final status in DuckDB.
 
 ## Public Dashboard
 
@@ -200,6 +209,12 @@ The app now includes a polished public dashboard served directly from FastAPI. I
   - `PUBLISH_S3_ENDPOINT_URL`
   - `AWS_ACCESS_KEY_ID`
   - `AWS_SECRET_ACCESS_KEY`
+
+## Reproducibility And Run Visibility
+
+- Every tracked command now writes a `running` -> `success|failed` lifecycle row into `ingestion_runs`.
+- Run metadata includes retry counts, upstream lineage, and immutable artifact paths for raw ingests, feature snapshots, scoring inputs, and score outputs.
+- The API exposes internal run visibility at `/ingestion-runs` when serving directly from DuckDB.
 
 ## Core Docs
 

@@ -172,6 +172,10 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
                     self.calls.append("score")
                     return 0
 
+                def cmd_publish_snapshot(self, _args):
+                    self.calls.append("publish")
+                    return 0
+
             cli_module = DummyCli()
             completed = refresh.run_refresh_pipeline(
                 config=config,
@@ -181,8 +185,7 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
             )
 
             self.assertEqual(completed, refresh.FULL_REFRESH_STEPS)
-            self.assertEqual(cli_module.calls, refresh.FULL_REFRESH_STEPS[:-1])
-            self.assertTrue((paths.publish_dir / "current" / "manifest.json").exists())
+            self.assertEqual(cli_module.calls, refresh.FULL_REFRESH_STEPS)
 
             duckdb = db._require_duckdb()
             connection = duckdb.connect(str(paths.db_path))

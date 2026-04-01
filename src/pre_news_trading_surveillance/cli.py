@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import db
+from . import artifacts, db
 from .events import sec_events
 from .features import daily as daily_features
 from .features import minute as minute_features
@@ -13,6 +15,73 @@ from .publish import snapshot as publish_snapshot
 from .publish import storage as publish_storage
 from .scoring import rules
 from .settings import default_paths
+
+
+@dataclass
+class IngestionRunTracker:
+    db_path: Path
+    run_id: str
+    pipeline_name: str
+    metadata: dict[str, object] = field(default_factory=dict)
+    artifact_paths: list[str] = field(default_factory=list)
+    attempt_count: int = 0
+    row_count: int = 0
+
+    def add_artifact(self, path: Path | str | None) -> None:
+        if path is None:
+            return
+        self.artifact_paths.append(str(path))
+
+    def add_attempts(self, attempts: int | None) -> None:
+        if attempts is None:
+            return
+        self.attempt_count += max(int(attempts), 0)
+
+
+@contextmanager
+def tracked_ingestion_run(
+    *,
+    paths,
+    pipeline_name: str,
+    metadata: dict[str, object] | None = None,
+    parent_run_id: str | None = None,
+):
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    tracker = IngestionRunTracker(
+        db_path=paths.db_path,
+        run_id=db.begin_ingestion_run(
+            db_path=paths.db_path,
+            pipeline_name=pipeline_name,
+            metadata=metadata or {},
+            parent_run_id=parent_run_id,
+        ),
+        pipeline_name=pipeline_name,
+        metadata=dict(metadata or {}),
+    )
+    try:
+        yield tracker
+    except Exception as exc:
+        db.finish_ingestion_run(
+            db_path=paths.db_path,
+            run_id=tracker.run_id,
+            status="failed",
+            row_count=tracker.row_count,
+            metadata=tracker.metadata,
+            error_message=str(exc),
+            artifact_paths=tracker.artifact_paths,
+            attempt_count=tracker.attempt_count,
+        )
+        raise
+    else:
+        db.finish_ingestion_run(
+            db_path=paths.db_path,
+            run_id=tracker.run_id,
+            status="success",
+            row_count=tracker.row_count,
+            metadata=tracker.metadata,
+            artifact_paths=tracker.artifact_paths,
+            attempt_count=tracker.attempt_count,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -322,6 +391,25 @@ def build_parser() -> argparse.ArgumentParser:
     serve_api.add_argument("--host", default="127.0.0.1")
     serve_api.add_argument("--port", type=int, default=8000)
 
+    list_runs = subparsers.add_parser(
+        "list-ingestion-runs",
+        help="List recent ingestion and scoring runs with status and artifact visibility.",
+    )
+    list_runs.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Maximum number of runs to return.",
+    )
+    list_runs.add_argument(
+        "--pipeline-name",
+        help="Optional pipeline filter.",
+    )
+    list_runs.add_argument(
+        "--status",
+        help="Optional status filter such as running, success, or failed.",
+    )
+
     return parser
 
 
@@ -338,20 +426,39 @@ def cmd_ingest_sec_reference(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
 
-    payload = sec.fetch_json(sec.SEC_TICKER_REFERENCE_URL, user_agent=args.user_agent)
-    references = sec.parse_company_tickers(payload)
-    raw_path, bronze_path = sec.persist_reference_snapshot(paths, payload, references)
-
-    if not args.skip_db:
-        db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-        db.upsert_ticker_references(paths.db_path, references)
-        db.record_ingestion_run(
-            db_path=paths.db_path,
+    run_context = (
+        tracked_ingestion_run(
+            paths=paths,
             pipeline_name="sec_ticker_reference",
-            status="success",
-            row_count=len(references),
-            metadata={"raw_path": str(raw_path), "bronze_path": str(bronze_path)},
+            metadata={"source_url": sec.SEC_TICKER_REFERENCE_URL},
+            parent_run_id=getattr(args, "parent_run_id", None),
         )
+        if not args.skip_db
+        else nullcontext(None)
+    )
+    with run_context as tracker:
+        fetch_metrics: dict[str, object] = {}
+        payload = sec.fetch_json(
+            sec.SEC_TICKER_REFERENCE_URL,
+            user_agent=args.user_agent,
+            metrics=fetch_metrics,
+        )
+        references = sec.parse_company_tickers(payload)
+        raw_path, bronze_path = sec.persist_reference_snapshot(paths, payload, references)
+
+        if tracker is not None:
+            db.upsert_ticker_references(paths.db_path, references)
+            tracker.row_count = len(references)
+            tracker.add_attempts(fetch_metrics.get("attempt_count"))
+            tracker.add_artifact(raw_path)
+            tracker.add_artifact(bronze_path)
+            tracker.metadata.update(
+                {
+                    "fetch_metrics": fetch_metrics,
+                    "raw_path": str(raw_path),
+                    "bronze_path": str(bronze_path),
+                }
+            )
 
     print(f"Stored {len(references)} ticker references")
     print(f"Raw snapshot: {raw_path}")
@@ -375,46 +482,66 @@ def cmd_ingest_sec_filings(args: argparse.Namespace) -> int:
         raise SystemExit(f"Unknown ticker(s) in SEC reference map: {', '.join(unknown_tickers)}")
 
     filtered_forms = {form.upper() for form in args.forms}
-    filings = []
-    raw_paths: dict[str, str] = {}
-
-    for ticker in requested_tickers:
-        reference = reference_map[ticker]
-        payload = sec.fetch_json(
-            sec.build_submission_url(reference.cik),
-            user_agent=args.user_agent,
-        )
-        raw_path = sec.persist_submission_snapshot(paths, reference.cik, payload)
-        raw_paths[ticker] = str(raw_path)
-
-        ticker_filings = sec.parse_recent_filings(
-            payload=payload,
-            ticker=ticker,
-            raw_path=raw_path,
-        )
-        if filtered_forms:
-            ticker_filings = [
-                filing for filing in ticker_filings if filing.form_type.upper() in filtered_forms
-            ]
-        filings.extend(ticker_filings[: args.per_ticker_limit])
-
-    bronze_path = sec.persist_filing_snapshot(paths, filings)
-
-    if not args.skip_db:
-        db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-        db.upsert_raw_filings(paths.db_path, filings)
-        db.record_ingestion_run(
-            db_path=paths.db_path,
+    run_context = (
+        tracked_ingestion_run(
+            paths=paths,
             pipeline_name="sec_filings",
-            status="success",
-            row_count=len(filings),
             metadata={
                 "tickers": requested_tickers,
                 "forms": sorted(filtered_forms),
-                "bronze_path": str(bronze_path),
-                "raw_paths": raw_paths,
+                "per_ticker_limit": args.per_ticker_limit,
+                "refresh_reference": args.refresh_reference,
             },
+            parent_run_id=getattr(args, "parent_run_id", None),
         )
+        if not args.skip_db
+        else nullcontext(None)
+    )
+    with run_context as tracker:
+        filings = []
+        raw_paths: dict[str, str] = {}
+        fetch_metrics_by_ticker: dict[str, dict[str, object]] = {}
+
+        for ticker in requested_tickers:
+            reference = reference_map[ticker]
+            fetch_metrics: dict[str, object] = {}
+            payload = sec.fetch_json(
+                sec.build_submission_url(reference.cik),
+                user_agent=args.user_agent,
+                metrics=fetch_metrics,
+            )
+            raw_path = sec.persist_submission_snapshot(paths, reference.cik, payload)
+            raw_paths[ticker] = str(raw_path)
+            fetch_metrics_by_ticker[ticker] = fetch_metrics
+
+            ticker_filings = sec.parse_recent_filings(
+                payload=payload,
+                ticker=ticker,
+                raw_path=raw_path,
+            )
+            if filtered_forms:
+                ticker_filings = [
+                    filing for filing in ticker_filings if filing.form_type.upper() in filtered_forms
+                ]
+            filings.extend(ticker_filings[: args.per_ticker_limit])
+
+            if tracker is not None:
+                tracker.add_artifact(raw_path)
+                tracker.add_attempts(fetch_metrics.get("attempt_count"))
+
+        bronze_path = sec.persist_filing_snapshot(paths, filings)
+
+        if tracker is not None:
+            db.upsert_raw_filings(paths.db_path, filings)
+            tracker.row_count = len(filings)
+            tracker.add_artifact(bronze_path)
+            tracker.metadata.update(
+                {
+                    "bronze_path": str(bronze_path),
+                    "raw_paths": raw_paths,
+                    "fetch_metrics_by_ticker": fetch_metrics_by_ticker,
+                }
+            )
 
     print(f"Stored {len(filings)} filing rows")
     print(f"Bronze snapshot: {bronze_path}")
@@ -424,62 +551,79 @@ def cmd_ingest_sec_filings(args: argparse.Namespace) -> int:
 def cmd_ingest_market_daily(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-
     if args.csv:
-        bars = daily_features.load_market_bars_from_csv(args.csv, source=args.source)
-        inserted = db.upsert_market_bars_daily(paths.db_path, bars)
-        db.record_ingestion_run(
-            db_path=paths.db_path,
+        with tracked_ingestion_run(
+            paths=paths,
             pipeline_name="market_bars_daily_csv",
-            status="success",
-            row_count=inserted,
-            metadata={"csv_path": str(args.csv), "source": args.source},
-        )
+            metadata={"source": args.source, "csv_path": str(args.csv)},
+            parent_run_id=getattr(args, "parent_run_id", None),
+        ) as tracker:
+            bars = daily_features.load_market_bars_from_csv(args.csv, source=args.source)
+            raw_snapshot_path = market.persist_local_market_snapshot(
+                paths,
+                granularity="daily",
+                csv_path=args.csv,
+            )
+            inserted = db.upsert_market_bars_daily(paths.db_path, bars)
+            tracker.row_count = inserted
+            tracker.add_artifact(raw_snapshot_path)
+            tracker.metadata.update({"raw_snapshot_path": str(raw_snapshot_path)})
         print(f"Stored {inserted} daily market bars from {args.csv}")
         return 0
 
     requested_tickers = _require_provider_tickers(args.tickers)
-    api_key = market.resolve_api_key(args.api_key, args.api_key_env)
-    bars = []
-    raw_paths: dict[str, str] = {}
-    for ticker in requested_tickers:
-        text = market.fetch_alpha_vantage_daily_csv(
-            ticker,
-            api_key,
-            outputsize=args.outputsize,
-            timeout_seconds=args.timeout_seconds,
-        )
-        raw_path = market.persist_raw_market_snapshot(
-            paths,
-            provider=args.provider,
-            granularity="daily",
-            ticker=ticker,
-            text=text,
-            descriptor=f"daily_{args.outputsize}",
-        )
-        raw_paths[ticker] = str(raw_path)
-        bars.extend(
-            market.parse_alpha_vantage_daily_csv(
-                text,
-                symbol=ticker,
-                source=f"{args.provider}_api",
-            )
-        )
-
-    inserted = db.upsert_market_bars_daily(paths.db_path, bars)
-    db.record_ingestion_run(
-        db_path=paths.db_path,
+    with tracked_ingestion_run(
+        paths=paths,
         pipeline_name="market_bars_daily_provider",
-        status="success",
-        row_count=inserted,
         metadata={
             "provider": args.provider,
             "tickers": requested_tickers,
             "outputsize": args.outputsize,
-            "raw_paths": raw_paths,
+            "timeout_seconds": args.timeout_seconds,
         },
-    )
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        api_key = market.resolve_api_key(args.api_key, args.api_key_env)
+        bars = []
+        raw_paths: dict[str, str] = {}
+        fetch_metrics_by_ticker: dict[str, dict[str, object]] = {}
+        for ticker in requested_tickers:
+            fetch_metrics: dict[str, object] = {}
+            text = market.fetch_alpha_vantage_daily_csv(
+                ticker,
+                api_key,
+                outputsize=args.outputsize,
+                timeout_seconds=args.timeout_seconds,
+                metrics=fetch_metrics,
+            )
+            raw_path = market.persist_raw_market_snapshot(
+                paths,
+                provider=args.provider,
+                granularity="daily",
+                ticker=ticker,
+                text=text,
+                descriptor=f"daily_{args.outputsize}",
+            )
+            raw_paths[ticker] = str(raw_path)
+            fetch_metrics_by_ticker[ticker] = fetch_metrics
+            tracker.add_artifact(raw_path)
+            tracker.add_attempts(fetch_metrics.get("attempt_count"))
+            bars.extend(
+                market.parse_alpha_vantage_daily_csv(
+                    text,
+                    symbol=ticker,
+                    source=f"{args.provider}_api",
+                )
+            )
+
+        inserted = db.upsert_market_bars_daily(paths.db_path, bars)
+        tracker.row_count = inserted
+        tracker.metadata.update(
+            {
+                "raw_paths": raw_paths,
+                "fetch_metrics_by_ticker": fetch_metrics_by_ticker,
+            }
+        )
     print(f"Stored {inserted} daily market bars from provider {args.provider}")
     return 0
 
@@ -487,65 +631,30 @@ def cmd_ingest_market_daily(args: argparse.Namespace) -> int:
 def cmd_ingest_market_minute(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-
     if args.csv:
-        bars = minute_features.load_market_bars_from_csv(args.csv, source=args.source)
-        inserted = db.upsert_market_bars_minute(paths.db_path, bars)
-        db.record_ingestion_run(
-            db_path=paths.db_path,
+        with tracked_ingestion_run(
+            paths=paths,
             pipeline_name="market_bars_minute_csv",
-            status="success",
-            row_count=inserted,
-            metadata={"csv_path": str(args.csv), "source": args.source},
-        )
+            metadata={"source": args.source, "csv_path": str(args.csv)},
+            parent_run_id=getattr(args, "parent_run_id", None),
+        ) as tracker:
+            bars = minute_features.load_market_bars_from_csv(args.csv, source=args.source)
+            raw_snapshot_path = market.persist_local_market_snapshot(
+                paths,
+                granularity="minute",
+                csv_path=args.csv,
+            )
+            inserted = db.upsert_market_bars_minute(paths.db_path, bars)
+            tracker.row_count = inserted
+            tracker.add_artifact(raw_snapshot_path)
+            tracker.metadata.update({"raw_snapshot_path": str(raw_snapshot_path)})
         print(f"Stored {inserted} minute market bars from {args.csv}")
         return 0
 
     requested_tickers = _require_provider_tickers(args.tickers)
-    api_key = market.resolve_api_key(args.api_key, args.api_key_env)
-    bars = []
-    raw_paths: dict[str, str] = {}
-    for ticker in requested_tickers:
-        text = market.fetch_alpha_vantage_intraday_csv(
-            ticker,
-            api_key,
-            interval=args.interval,
-            adjusted=args.adjusted,
-            extended_hours=args.extended_hours,
-            outputsize=args.outputsize,
-            month=args.month,
-            entitlement=args.entitlement,
-            timeout_seconds=args.timeout_seconds,
-        )
-        descriptor_parts = [f"intraday_{args.interval}", args.outputsize]
-        if args.month:
-            descriptor_parts.append(args.month)
-        if args.entitlement:
-            descriptor_parts.append(args.entitlement)
-        raw_path = market.persist_raw_market_snapshot(
-            paths,
-            provider=args.provider,
-            granularity="minute",
-            ticker=ticker,
-            text=text,
-            descriptor="_".join(descriptor_parts),
-        )
-        raw_paths[ticker] = str(raw_path)
-        bars.extend(
-            market.parse_alpha_vantage_intraday_csv(
-                text,
-                symbol=ticker,
-                source=f"{args.provider}_api",
-            )
-        )
-
-    inserted = db.upsert_market_bars_minute(paths.db_path, bars)
-    db.record_ingestion_run(
-        db_path=paths.db_path,
+    with tracked_ingestion_run(
+        paths=paths,
         pipeline_name="market_bars_minute_provider",
-        status="success",
-        row_count=inserted,
         metadata={
             "provider": args.provider,
             "tickers": requested_tickers,
@@ -555,9 +664,61 @@ def cmd_ingest_market_minute(args: argparse.Namespace) -> int:
             "entitlement": args.entitlement,
             "adjusted": args.adjusted,
             "extended_hours": args.extended_hours,
-            "raw_paths": raw_paths,
+            "timeout_seconds": args.timeout_seconds,
         },
-    )
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        api_key = market.resolve_api_key(args.api_key, args.api_key_env)
+        bars = []
+        raw_paths: dict[str, str] = {}
+        fetch_metrics_by_ticker: dict[str, dict[str, object]] = {}
+        for ticker in requested_tickers:
+            fetch_metrics: dict[str, object] = {}
+            text = market.fetch_alpha_vantage_intraday_csv(
+                ticker,
+                api_key,
+                interval=args.interval,
+                adjusted=args.adjusted,
+                extended_hours=args.extended_hours,
+                outputsize=args.outputsize,
+                month=args.month,
+                entitlement=args.entitlement,
+                timeout_seconds=args.timeout_seconds,
+                metrics=fetch_metrics,
+            )
+            descriptor_parts = [f"intraday_{args.interval}", args.outputsize]
+            if args.month:
+                descriptor_parts.append(args.month)
+            if args.entitlement:
+                descriptor_parts.append(args.entitlement)
+            raw_path = market.persist_raw_market_snapshot(
+                paths,
+                provider=args.provider,
+                granularity="minute",
+                ticker=ticker,
+                text=text,
+                descriptor="_".join(descriptor_parts),
+            )
+            raw_paths[ticker] = str(raw_path)
+            fetch_metrics_by_ticker[ticker] = fetch_metrics
+            tracker.add_artifact(raw_path)
+            tracker.add_attempts(fetch_metrics.get("attempt_count"))
+            bars.extend(
+                market.parse_alpha_vantage_intraday_csv(
+                    text,
+                    symbol=ticker,
+                    source=f"{args.provider}_api",
+                )
+            )
+
+        inserted = db.upsert_market_bars_minute(paths.db_path, bars)
+        tracker.row_count = inserted
+        tracker.metadata.update(
+            {
+                "raw_paths": raw_paths,
+                "fetch_metrics_by_ticker": fetch_metrics_by_ticker,
+            }
+        )
     print(f"Stored {inserted} minute market bars from provider {args.provider}")
     return 0
 
@@ -565,21 +726,9 @@ def cmd_ingest_market_minute(args: argparse.Namespace) -> int:
 def cmd_build_sec_events(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-    filings = db.load_raw_filings(paths.db_path, forms=args.forms)
-    events = sec_events.build_canonical_events_from_filings(
-        filings,
-        sentiment_backend_name=args.sentiment_backend,
-        novelty_backend_name=args.novelty_backend,
-        sentiment_model=args.sentiment_model,
-        novelty_model=args.novelty_model,
-    )
-    inserted = db.upsert_events(paths.db_path, events)
-    db.record_ingestion_run(
-        db_path=paths.db_path,
+    with tracked_ingestion_run(
+        paths=paths,
         pipeline_name="build_sec_events",
-        status="success",
-        row_count=inserted,
         metadata={
             "forms": args.forms,
             "sentiment_backend": args.sentiment_backend,
@@ -587,7 +736,34 @@ def cmd_build_sec_events(args: argparse.Namespace) -> int:
             "novelty_backend": args.novelty_backend,
             "novelty_model": args.novelty_model,
         },
-    )
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        filings = db.load_raw_filings(paths.db_path, forms=args.forms)
+        events = sec_events.build_canonical_events_from_filings(
+            filings,
+            sentiment_backend_name=args.sentiment_backend,
+            novelty_backend_name=args.novelty_backend,
+            sentiment_model=args.sentiment_model,
+            novelty_model=args.novelty_model,
+        )
+        snapshot_path = artifacts.write_ndjson_snapshot(
+            paths.silver_dir / "events",
+            name_prefix="sec_events",
+            rows=[event.as_dict() for event in events],
+        )
+        inserted = db.upsert_events(paths.db_path, events)
+        tracker.row_count = inserted
+        tracker.add_artifact(snapshot_path)
+        tracker.metadata.update(
+            {
+                "input_filings": len(filings),
+                "snapshot_path": str(snapshot_path),
+                "upstream_runs": _lineage_snapshot(
+                    paths.db_path,
+                    ["sec_filings", "sec_ticker_reference"],
+                ),
+            }
+        )
     print(f"Built {inserted} canonical events")
     return 0
 
@@ -595,18 +771,34 @@ def cmd_build_sec_events(args: argparse.Namespace) -> int:
 def cmd_compute_daily_features(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-    events = db.load_events(paths.db_path, ticker=args.ticker)
-    bars = db.load_market_bars_daily(paths.db_path, ticker=args.ticker)
-    features = daily_features.compute_event_market_features(events, bars)
-    inserted = db.upsert_event_market_features(paths.db_path, features)
-    db.record_ingestion_run(
-        db_path=paths.db_path,
+    with tracked_ingestion_run(
+        paths=paths,
         pipeline_name="compute_daily_features",
-        status="success",
-        row_count=inserted,
         metadata={"ticker": args.ticker},
-    )
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        events = db.load_events(paths.db_path, ticker=args.ticker)
+        bars = db.load_market_bars_daily(paths.db_path, ticker=args.ticker)
+        features = daily_features.compute_event_market_features(events, bars)
+        snapshot_path = artifacts.write_ndjson_snapshot(
+            paths.silver_dir / "features" / "daily",
+            name_prefix="daily_event_features",
+            rows=[feature.as_dict() for feature in features],
+        )
+        inserted = db.upsert_event_market_features(paths.db_path, features)
+        tracker.row_count = inserted
+        tracker.add_artifact(snapshot_path)
+        tracker.metadata.update(
+            {
+                "events_loaded": len(events),
+                "bars_loaded": len(bars),
+                "snapshot_path": str(snapshot_path),
+                "upstream_runs": _lineage_snapshot(
+                    paths.db_path,
+                    ["build_sec_events", "market_bars_daily_provider", "market_bars_daily_csv"],
+                ),
+            }
+        )
     print(f"Computed {inserted} daily feature rows")
     return 0
 
@@ -614,18 +806,34 @@ def cmd_compute_daily_features(args: argparse.Namespace) -> int:
 def cmd_compute_minute_features(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-    events = db.load_events(paths.db_path, ticker=args.ticker)
-    bars = db.load_market_bars_minute(paths.db_path, ticker=args.ticker)
-    features = minute_features.compute_event_market_features(events, bars)
-    inserted = db.upsert_event_market_features_minute(paths.db_path, features)
-    db.record_ingestion_run(
-        db_path=paths.db_path,
+    with tracked_ingestion_run(
+        paths=paths,
         pipeline_name="compute_minute_features",
-        status="success",
-        row_count=inserted,
         metadata={"ticker": args.ticker},
-    )
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        events = db.load_events(paths.db_path, ticker=args.ticker)
+        bars = db.load_market_bars_minute(paths.db_path, ticker=args.ticker)
+        features = minute_features.compute_event_market_features(events, bars)
+        snapshot_path = artifacts.write_ndjson_snapshot(
+            paths.silver_dir / "features" / "minute",
+            name_prefix="minute_event_features",
+            rows=[feature.as_dict() for feature in features],
+        )
+        inserted = db.upsert_event_market_features_minute(paths.db_path, features)
+        tracker.row_count = inserted
+        tracker.add_artifact(snapshot_path)
+        tracker.metadata.update(
+            {
+                "events_loaded": len(events),
+                "bars_loaded": len(bars),
+                "snapshot_path": str(snapshot_path),
+                "upstream_runs": _lineage_snapshot(
+                    paths.db_path,
+                    ["build_sec_events", "market_bars_minute_provider", "market_bars_minute_csv"],
+                ),
+            }
+        )
     print(f"Computed {inserted} minute feature rows")
     return 0
 
@@ -633,17 +841,49 @@ def cmd_compute_minute_features(args: argparse.Namespace) -> int:
 def cmd_score_events(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-    events = db.load_events(paths.db_path, ticker=args.ticker)
-    scores = rules.score_events_from_database(paths.db_path, events)
-    inserted = db.upsert_event_scores(paths.db_path, scores)
-    db.record_ingestion_run(
-        db_path=paths.db_path,
+    with tracked_ingestion_run(
+        paths=paths,
         pipeline_name="score_events",
-        status="success",
-        row_count=inserted,
         metadata={"ticker": args.ticker},
-    )
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        events = db.load_events(paths.db_path, ticker=args.ticker)
+        details = []
+        for event in events:
+            detail = db.get_ranked_event(paths.db_path, event.event_id)
+            if detail is not None:
+                details.append(detail)
+        inputs_snapshot_path = artifacts.write_ndjson_snapshot(
+            paths.silver_dir / "scoring",
+            name_prefix="score_inputs",
+            rows=details,
+        )
+        scores = [rules.score_event_detail(detail) for detail in details]
+        outputs_snapshot_path = artifacts.write_ndjson_snapshot(
+            paths.silver_dir / "scoring",
+            name_prefix="event_scores",
+            rows=[score.as_dict() for score in scores],
+        )
+        inserted = db.upsert_event_scores(paths.db_path, scores)
+        tracker.row_count = inserted
+        tracker.add_artifact(inputs_snapshot_path)
+        tracker.add_artifact(outputs_snapshot_path)
+        tracker.metadata.update(
+            {
+                "events_loaded": len(events),
+                "score_inputs": len(details),
+                "inputs_snapshot_path": str(inputs_snapshot_path),
+                "outputs_snapshot_path": str(outputs_snapshot_path),
+                "upstream_runs": _lineage_snapshot(
+                    paths.db_path,
+                    [
+                        "build_sec_events",
+                        "compute_daily_features",
+                        "compute_minute_features",
+                    ],
+                ),
+            }
+        )
     print(f"Scored {inserted} events")
     return 0
 
@@ -651,27 +891,50 @@ def cmd_score_events(args: argparse.Namespace) -> int:
 def cmd_publish_snapshot(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
-    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
-    output_dir = args.output_dir or (paths.publish_dir / "current")
-    bundle = publish_snapshot.build_snapshot_bundle(
-        db_path=paths.db_path,
-        events_limit=args.events_limit,
-    )
-    publish_snapshot.write_snapshot_bundle(bundle, output_dir)
-    print(f"Published snapshot bundle with {len(bundle.events)} events to {output_dir}")
-
-    if args.s3_bucket:
-        uploaded = publish_storage.upload_directory_to_s3(
-            source_dir=output_dir,
-            bucket=args.s3_bucket,
-            prefix=args.s3_prefix,
-            region=args.s3_region,
-            endpoint_url=args.s3_endpoint_url,
-            access_key=publish_storage.resolve_optional_env(args.s3_access_key_env),
-            secret_key=publish_storage.resolve_optional_env(args.s3_secret_key_env),
-            session_token=publish_storage.resolve_optional_env(args.s3_session_token_env),
+    with tracked_ingestion_run(
+        paths=paths,
+        pipeline_name="publish_snapshot",
+        metadata={"events_limit": args.events_limit},
+        parent_run_id=getattr(args, "parent_run_id", None),
+    ) as tracker:
+        output_dir = args.output_dir or (paths.publish_dir / "current")
+        bundle = publish_snapshot.build_snapshot_bundle(
+            db_path=paths.db_path,
+            events_limit=args.events_limit,
         )
-        print(f"Uploaded {len(uploaded)} files to s3://{args.s3_bucket}/{args.s3_prefix}".rstrip("/"))
+        publish_snapshot.write_snapshot_bundle(bundle, output_dir)
+        tracker.row_count = len(bundle.events)
+        tracker.add_artifact(output_dir / "manifest.json")
+        tracker.add_artifact(output_dir / "summary.json")
+        tracker.add_artifact(output_dir / "events.json")
+        tracker.metadata.update(
+            {
+                "output_dir": str(output_dir),
+                "manifest_generated_at": bundle.manifest["generated_at"],
+                "upstream_runs": _lineage_snapshot(paths.db_path, ["score_events"]),
+            }
+        )
+        print(f"Published snapshot bundle with {len(bundle.events)} events to {output_dir}")
+
+        if args.s3_bucket:
+            uploaded = publish_storage.upload_directory_to_s3(
+                source_dir=output_dir,
+                bucket=args.s3_bucket,
+                prefix=args.s3_prefix,
+                region=args.s3_region,
+                endpoint_url=args.s3_endpoint_url,
+                access_key=publish_storage.resolve_optional_env(args.s3_access_key_env),
+                secret_key=publish_storage.resolve_optional_env(args.s3_secret_key_env),
+                session_token=publish_storage.resolve_optional_env(args.s3_session_token_env),
+            )
+            tracker.metadata.update(
+                {
+                    "s3_bucket": args.s3_bucket,
+                    "s3_prefix": args.s3_prefix,
+                    "uploaded_keys": uploaded[:50],
+                }
+            )
+            print(f"Uploaded {len(uploaded)} files to s3://{args.s3_bucket}/{args.s3_prefix}".rstrip("/"))
     return 0
 
 
@@ -713,10 +976,45 @@ def cmd_serve_api(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_list_ingestion_runs(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
+    runs = db.list_ingestion_runs(
+        paths.db_path,
+        limit=args.limit,
+        pipeline_name=args.pipeline_name,
+        status=args.status,
+    )
+    for run in runs:
+        artifacts_count = len(run.get("artifact_paths", []))
+        print(
+            f"{run['started_at']} {run['status']} {run['pipeline_name']} "
+            f"rows={run['row_count']} attempts={run.get('attempt_count', 0)} "
+            f"artifacts={artifacts_count} run_id={run['run_id']}"
+        )
+    print(f"Returned {len(runs)} run(s)")
+    return 0
+
+
 def _require_provider_tickers(tickers: list[str] | None) -> list[str]:
     if not tickers:
         raise SystemExit("`--tickers` is required when using `--provider`.")
     return [ticker.upper() for ticker in tickers]
+
+
+def _lineage_snapshot(db_path: Path, pipeline_names: list[str]) -> dict[str, dict[str, object]]:
+    upstream_runs = db.get_latest_successful_runs(db_path, pipeline_names)
+    lineage: dict[str, dict[str, object]] = {}
+    for pipeline_name, run in upstream_runs.items():
+        lineage[pipeline_name] = {
+            "run_id": run["run_id"],
+            "started_at": run["started_at"],
+            "finished_at": run.get("finished_at"),
+            "artifact_paths": run.get("artifact_paths", []),
+            "attempt_count": run.get("attempt_count", 0),
+        }
+    return lineage
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -747,6 +1045,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_refresh_pipeline(args)
     if args.command == "serve-api":
         return cmd_serve_api(args)
+    if args.command == "list-ingestion-runs":
+        return cmd_list_ingestion_runs(args)
 
     parser.error(f"Unknown command: {args.command}")
     return 2

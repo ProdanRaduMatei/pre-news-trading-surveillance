@@ -97,6 +97,28 @@ def get_event(event_id: str) -> dict[str, object]:
     return event
 
 
+@app.get("/ingestion-runs")
+def list_ingestion_runs(
+    limit: int = Query(default=25, ge=1, le=250),
+    pipeline_name: str | None = None,
+    status: str | None = None,
+) -> dict[str, object]:
+    paths = default_paths()
+    store = _published_store(paths)
+    if store is not None:
+        raise HTTPException(
+            status_code=503,
+            detail="Ingestion run visibility is only available in DuckDB mode.",
+        )
+    items = db.list_ingestion_runs(
+        paths.db_path,
+        limit=limit,
+        pipeline_name=pipeline_name,
+        status=status,
+    )
+    return {"items": items, "count": len(items)}
+
+
 def _data_source_mode() -> str:
     return os.getenv("PNTS_API_DATA_SOURCE", "duckdb").strip().lower() or "duckdb"
 

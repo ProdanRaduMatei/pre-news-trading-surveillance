@@ -4,13 +4,16 @@ import csv
 import json
 import os
 import ssl
+import time
 from datetime import date, datetime, timezone
 from io import StringIO
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from .. import artifacts
 from ..domain import MarketBarDaily, MarketBarMinute
 
 ALPHA_VANTAGE_BASE_URL = "https://www.alphavantage.co/query"
@@ -18,10 +21,16 @@ ALPHA_VANTAGE_ENV_VAR = "ALPHAVANTAGE_API_KEY"
 ALPHA_VANTAGE_PROVIDER = "alpha_vantage"
 ALPHA_VANTAGE_TZ = ZoneInfo("America/New_York")
 DEFAULT_USER_AGENT = "PreNewsTradingSurveillance/0.1"
+DEFAULT_RETRY_ATTEMPTS = 4
+DEFAULT_RETRY_BACKOFF_SECONDS = 1.5
 
 
 class MarketProviderError(RuntimeError):
     """Raised when a market data provider request fails or returns an invalid payload."""
+
+
+class MarketProviderRateLimitError(MarketProviderError):
+    """Raised when the provider indicates a retryable rate-limit condition."""
 
 
 def resolve_api_key(api_key: str | None, api_key_env: str = ALPHA_VANTAGE_ENV_VAR) -> str:
@@ -42,6 +51,9 @@ def fetch_alpha_vantage_daily_csv(
     outputsize: str = "compact",
     timeout_seconds: int = 30,
     user_agent: str = DEFAULT_USER_AGENT,
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    metrics: dict[str, object] | None = None,
 ) -> str:
     return _fetch_alpha_vantage_csv(
         {
@@ -53,6 +65,9 @@ def fetch_alpha_vantage_daily_csv(
         },
         timeout_seconds=timeout_seconds,
         user_agent=user_agent,
+        retry_attempts=retry_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        metrics=metrics,
     )
 
 
@@ -68,6 +83,9 @@ def fetch_alpha_vantage_intraday_csv(
     entitlement: str | None = None,
     timeout_seconds: int = 30,
     user_agent: str = DEFAULT_USER_AGENT,
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    metrics: dict[str, object] | None = None,
 ) -> str:
     params: dict[str, str] = {
         "function": "TIME_SERIES_INTRADAY",
@@ -87,6 +105,9 @@ def fetch_alpha_vantage_intraday_csv(
         params,
         timeout_seconds=timeout_seconds,
         user_agent=user_agent,
+        retry_attempts=retry_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        metrics=metrics,
     )
 
 
@@ -166,11 +187,22 @@ def persist_raw_market_snapshot(
     return raw_path
 
 
+def persist_local_market_snapshot(paths, *, granularity: str, csv_path: Path) -> Path:
+    return artifacts.copy_snapshot(
+        csv_path,
+        paths.raw_dir / "market" / "csv" / granularity,
+        name_prefix=csv_path.stem,
+    )
+
+
 def _fetch_alpha_vantage_csv(
     params: dict[str, str],
     *,
     timeout_seconds: int,
     user_agent: str,
+    retry_attempts: int,
+    retry_backoff_seconds: float,
+    metrics: dict[str, object] | None,
 ) -> str:
     url = f"{ALPHA_VANTAGE_BASE_URL}?{urlencode(params)}"
     request = Request(
@@ -181,11 +213,50 @@ def _fetch_alpha_vantage_csv(
         },
     )
     context = _build_ssl_context()
-    with urlopen(request, timeout=timeout_seconds, context=context) as response:
-        text = response.read().decode("utf-8")
+    attempts = 0
+    rate_limited = False
+    last_error: str | None = None
 
-    _raise_for_provider_error(text)
-    return text
+    while attempts < max(retry_attempts, 1):
+        attempts += 1
+        try:
+            with urlopen(request, timeout=timeout_seconds, context=context) as response:
+                text = response.read().decode("utf-8")
+            _raise_for_provider_error(text)
+            _populate_fetch_metrics(metrics, attempts=attempts, rate_limited=rate_limited)
+            return text
+        except MarketProviderRateLimitError as exc:
+            last_error = str(exc)
+            rate_limited = True
+            if attempts >= retry_attempts:
+                break
+        except HTTPError as exc:
+            last_error = f"HTTP {exc.code}: {exc.reason}"
+            rate_limited = rate_limited or exc.code == 429
+            if not _should_retry_http_error(exc) or attempts >= retry_attempts:
+                break
+        except (URLError, TimeoutError, OSError) as exc:
+            last_error = str(exc)
+            if attempts >= retry_attempts:
+                break
+        except MarketProviderError as exc:
+            _populate_fetch_metrics(
+                metrics,
+                attempts=attempts,
+                rate_limited=rate_limited,
+                last_error=str(exc),
+            )
+            raise
+
+        time.sleep(_compute_backoff_delay(retry_backoff_seconds, attempts))
+
+    _populate_fetch_metrics(
+        metrics,
+        attempts=attempts,
+        rate_limited=rate_limited,
+        last_error=last_error,
+    )
+    raise MarketProviderError(last_error or f"Provider request failed for {params.get('symbol', 'unknown')}")
 
 
 def _read_csv_rows(text: str) -> list[dict[str, str]]:
@@ -221,7 +292,10 @@ def _raise_for_provider_error(text: str) -> None:
 
     for key in ("Error Message", "Note", "Information", "message"):
         if key in payload:
-            raise MarketProviderError(str(payload[key]))
+            message = str(payload[key])
+            if _is_rate_limit_message(message):
+                raise MarketProviderRateLimitError(message)
+            raise MarketProviderError(message)
 
     raise MarketProviderError("Provider returned an unexpected JSON payload instead of CSV.")
 
@@ -267,3 +341,39 @@ def _build_ssl_context() -> ssl.SSLContext:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _populate_fetch_metrics(
+    metrics: dict[str, object] | None,
+    *,
+    attempts: int,
+    rate_limited: bool,
+    last_error: str | None = None,
+) -> None:
+    if metrics is None:
+        return
+    metrics["attempt_count"] = attempts
+    metrics["rate_limited"] = rate_limited
+    if last_error:
+        metrics["last_error"] = last_error
+
+
+def _compute_backoff_delay(base_delay: float, attempt: int) -> float:
+    scaled_delay = max(base_delay, 0.0) * (2 ** max(attempt - 1, 0))
+    return min(scaled_delay, 30.0)
+
+
+def _should_retry_http_error(error: HTTPError) -> bool:
+    return error.code == 429 or 500 <= error.code < 600
+
+
+def _is_rate_limit_message(message: str) -> bool:
+    lowered = message.lower()
+    phrases = (
+        "rate limit",
+        "frequency",
+        "too many requests",
+        "per minute",
+        "per day",
+    )
+    return any(phrase in lowered for phrase in phrases)

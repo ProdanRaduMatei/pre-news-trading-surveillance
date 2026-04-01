@@ -37,10 +37,18 @@ class ProjectPaths:
             self.raw_dir / "sec",
             self.raw_dir / "sec" / "submissions",
             self.raw_dir / "market",
+            self.raw_dir / "market" / "csv",
+            self.raw_dir / "market" / "csv" / "daily",
+            self.raw_dir / "market" / "csv" / "minute",
             self.raw_dir / "market" / "alpha_vantage",
             self.raw_dir / "market" / "alpha_vantage" / "daily",
             self.raw_dir / "market" / "alpha_vantage" / "minute",
             self.bronze_dir / "sec",
+            self.silver_dir / "events",
+            self.silver_dir / "features",
+            self.silver_dir / "features" / "daily",
+            self.silver_dir / "features" / "minute",
+            self.silver_dir / "scoring",
         ):
             path.mkdir(parents=True, exist_ok=True)
 

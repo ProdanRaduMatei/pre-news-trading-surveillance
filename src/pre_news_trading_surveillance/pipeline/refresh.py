@@ -8,8 +8,6 @@ from pathlib import Path
 from typing import Callable
 
 from .. import db
-from ..publish import snapshot
-from ..publish import storage as publish_storage
 
 RefreshStep = str
 FULL_REFRESH_STEPS: list[RefreshStep] = [
@@ -200,6 +198,14 @@ def run_refresh_pipeline(
     db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
 
     completed: list[str] = []
+    refresh_run_id = db.begin_ingestion_run(
+        db_path=paths.db_path,
+        pipeline_name="refresh_pipeline",
+        metadata={
+            "requested_steps": steps,
+            "tickers": config.tickers,
+        },
+    )
     try:
         for step in steps:
             if step == "sec_reference":
@@ -208,6 +214,7 @@ def run_refresh_pipeline(
                     Namespace(
                         user_agent=_resolve_required_value(config.sec.user_agent, config.sec.user_agent_env),
                         skip_db=False,
+                        parent_run_id=refresh_run_id,
                     ),
                 )
             elif step == "sec_filings":
@@ -220,6 +227,7 @@ def run_refresh_pipeline(
                         per_ticker_limit=config.sec.per_ticker_limit,
                         refresh_reference=config.sec.refresh_reference,
                         skip_db=False,
+                        parent_run_id=refresh_run_id,
                     ),
                 )
             elif step == "market_daily":
@@ -236,6 +244,7 @@ def run_refresh_pipeline(
                         api_key_env=config.market.api_key_env,
                         outputsize=config.market_daily.outputsize,
                         timeout_seconds=config.market.timeout_seconds,
+                        parent_run_id=refresh_run_id,
                     ),
                 )
             elif step == "market_minute":
@@ -257,6 +266,7 @@ def run_refresh_pipeline(
                         adjusted=config.market_minute.adjusted,
                         extended_hours=config.market_minute.extended_hours,
                         timeout_seconds=config.market.timeout_seconds,
+                        parent_run_id=refresh_run_id,
                     ),
                 )
             elif step == "build_events":
@@ -268,89 +278,74 @@ def run_refresh_pipeline(
                         sentiment_model=config.nlp.sentiment_model,
                         novelty_backend=config.nlp.novelty_backend,
                         novelty_model=config.nlp.novelty_model,
+                        parent_run_id=refresh_run_id,
                     ),
                 )
             elif step == "compute_daily":
                 _run_step(
                     cli_module.cmd_compute_daily_features,
-                    Namespace(ticker=None),
+                    Namespace(ticker=None, parent_run_id=refresh_run_id),
                 )
             elif step == "compute_minute":
                 _run_step(
                     cli_module.cmd_compute_minute_features,
-                    Namespace(ticker=None),
+                    Namespace(ticker=None, parent_run_id=refresh_run_id),
                 )
             elif step == "score":
                 _run_step(
                     cli_module.cmd_score_events,
-                    Namespace(ticker=None),
+                    Namespace(ticker=None, parent_run_id=refresh_run_id),
                 )
             elif step == "publish":
                 if not config.publish.enabled:
                     continue
-                output_dir = _resolve_publish_output_dir(config.publish.output_dir, paths.root)
-                bundle = snapshot.build_snapshot_bundle(
-                    db_path=paths.db_path,
-                    events_limit=config.publish.max_events,
-                )
-                snapshot.write_snapshot_bundle(bundle, output_dir)
-
-                upload_keys: list[str] = []
-                if config.publish.s3_enabled:
-                    bucket = _require_publish_bucket(
-                        _resolve_optional_value(config.publish.s3_bucket, config.publish.s3_bucket_env)
-                    )
-                    upload_keys = publish_storage.upload_directory_to_s3(
-                        source_dir=output_dir,
-                        bucket=bucket,
-                        prefix=config.publish.s3_prefix,
-                        region=_resolve_optional_value(
+                _run_step(
+                    cli_module.cmd_publish_snapshot,
+                    Namespace(
+                        output_dir=_resolve_publish_output_dir(config.publish.output_dir, paths.root),
+                        events_limit=config.publish.max_events,
+                        s3_bucket=_resolve_optional_value(
+                            config.publish.s3_bucket,
+                            config.publish.s3_bucket_env,
+                        )
+                        if config.publish.s3_enabled
+                        else None,
+                        s3_prefix=config.publish.s3_prefix,
+                        s3_region=_resolve_optional_value(
                             config.publish.s3_region,
                             config.publish.s3_region_env,
                         ),
-                        endpoint_url=_resolve_optional_value(
+                        s3_endpoint_url=_resolve_optional_value(
                             config.publish.s3_endpoint_url,
                             config.publish.s3_endpoint_url_env,
                         ),
-                        access_key=publish_storage.resolve_optional_env(config.publish.s3_access_key_env),
-                        secret_key=publish_storage.resolve_optional_env(config.publish.s3_secret_key_env),
-                        session_token=publish_storage.resolve_optional_env(config.publish.s3_session_token_env),
-                    )
-
-                db.record_ingestion_run(
-                    db_path=paths.db_path,
-                    pipeline_name="publish_snapshot",
-                    status="success",
-                    row_count=len(bundle.events),
-                    metadata={
-                        "output_dir": str(output_dir),
-                        "max_events": config.publish.max_events,
-                        "s3_enabled": config.publish.s3_enabled,
-                        "s3_bucket": config.publish.s3_bucket,
-                        "s3_prefix": config.publish.s3_prefix,
-                        "uploaded_keys": upload_keys[:10],
-                    },
+                        s3_access_key_env=config.publish.s3_access_key_env,
+                        s3_secret_key_env=config.publish.s3_secret_key_env,
+                        s3_session_token_env=config.publish.s3_session_token_env,
+                        parent_run_id=refresh_run_id,
+                    ),
                 )
             else:
                 raise ValueError(f"Unhandled refresh step: {step}")
             completed.append(step)
     except Exception as exc:
-        db.record_ingestion_run(
+        db.finish_ingestion_run(
             db_path=paths.db_path,
-            pipeline_name="refresh_pipeline",
+            run_id=refresh_run_id,
             status="failed",
             row_count=len(completed),
             metadata={
                 "completed_steps": completed,
                 "requested_steps": steps,
-                "failure": str(exc),
+                "tickers": config.tickers,
             },
+            error_message=str(exc),
         )
         raise
 
-    db.record_ingestion_run(
+    db.finish_ingestion_run(
         db_path=paths.db_path,
-        pipeline_name="refresh_pipeline",
+        run_id=refresh_run_id,
         status="success",
         row_count=len(completed),
         metadata={
@@ -389,12 +384,6 @@ def _resolve_publish_output_dir(output_dir: str, root: Path) -> Path:
     if path.is_absolute():
         return path
     return root / path
-
-
-def _require_publish_bucket(bucket: str | None) -> str:
-    if bucket:
-        return bucket
-    raise RuntimeError("S3 publication is enabled but `publish.s3_bucket` is not configured.")
 
 
 def _resolve_optional_value(explicit: str | None, env_name: str) -> str | None:

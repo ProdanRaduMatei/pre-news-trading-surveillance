@@ -3,15 +3,23 @@ from __future__ import annotations
 import gzip
 import json
 import ssl
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .models import RawFilingRecord, TickerReference
 
 SEC_TICKER_REFERENCE_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_SUBMISSIONS_BASE_URL = "https://data.sec.gov/submissions"
+DEFAULT_RETRY_ATTEMPTS = 4
+DEFAULT_RETRY_BACKOFF_SECONDS = 1.5
+
+
+class SecFetchError(RuntimeError):
+    """Raised when an SEC request fails after retry handling."""
 
 
 def utc_now_iso() -> str:
@@ -26,7 +34,15 @@ def build_submission_url(cik: str | int) -> str:
     return f"{SEC_SUBMISSIONS_BASE_URL}/CIK{zero_pad_cik(cik)}.json"
 
 
-def fetch_json(url: str, user_agent: str, timeout_seconds: int = 30) -> dict[str, Any]:
+def fetch_json(
+    url: str,
+    user_agent: str,
+    timeout_seconds: int = 30,
+    *,
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    metrics: dict[str, object] | None = None,
+) -> dict[str, Any]:
     headers = {
         "User-Agent": user_agent,
         "Accept-Encoding": "gzip, deflate",
@@ -34,11 +50,39 @@ def fetch_json(url: str, user_agent: str, timeout_seconds: int = 30) -> dict[str
     }
     request = Request(url, headers=headers)
     context = _build_ssl_context()
-    with urlopen(request, timeout=timeout_seconds, context=context) as response:
-        payload = response.read()
-        if response.headers.get("Content-Encoding", "").lower() == "gzip":
-            payload = gzip.decompress(payload)
-    return json.loads(payload.decode("utf-8"))
+    attempts = 0
+    rate_limited = False
+    last_error: str | None = None
+
+    while attempts < max(retry_attempts, 1):
+        attempts += 1
+        try:
+            with urlopen(request, timeout=timeout_seconds, context=context) as response:
+                payload = response.read()
+                if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                    payload = gzip.decompress(payload)
+            parsed = json.loads(payload.decode("utf-8"))
+            _populate_fetch_metrics(metrics, attempts=attempts, rate_limited=rate_limited)
+            return parsed
+        except HTTPError as exc:
+            last_error = f"HTTP {exc.code}: {exc.reason}"
+            rate_limited = rate_limited or exc.code == 429
+            if not _should_retry_http_error(exc) or attempts >= retry_attempts:
+                break
+        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+            last_error = str(exc)
+            if attempts >= retry_attempts:
+                break
+
+        time.sleep(_compute_backoff_delay(retry_backoff_seconds, attempts))
+
+    _populate_fetch_metrics(
+        metrics,
+        attempts=attempts,
+        rate_limited=rate_limited,
+        last_error=last_error,
+    )
+    raise SecFetchError(last_error or f"Failed to fetch SEC payload from {url}")
 
 
 def parse_company_tickers(
@@ -219,3 +263,27 @@ def _normalize_item_token(value: Any) -> str:
     if not text:
         return text
     return text.replace("Item", "").replace("item", "").strip()
+
+
+def _populate_fetch_metrics(
+    metrics: dict[str, object] | None,
+    *,
+    attempts: int,
+    rate_limited: bool,
+    last_error: str | None = None,
+) -> None:
+    if metrics is None:
+        return
+    metrics["attempt_count"] = attempts
+    metrics["rate_limited"] = rate_limited
+    if last_error:
+        metrics["last_error"] = last_error
+
+
+def _should_retry_http_error(error: HTTPError) -> bool:
+    return error.code == 429 or 500 <= error.code < 600
+
+
+def _compute_backoff_delay(base_delay: float, attempt: int) -> float:
+    scaled_delay = max(base_delay, 0.0) * (2 ** max(attempt - 1, 0))
+    return min(scaled_delay, 30.0)

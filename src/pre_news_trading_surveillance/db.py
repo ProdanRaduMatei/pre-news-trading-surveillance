@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -861,6 +862,37 @@ def record_ingestion_run(
     status: str,
     row_count: int,
     metadata: dict[str, object] | None = None,
+    *,
+    error_message: str | None = None,
+    artifact_paths: list[str] | None = None,
+    parent_run_id: str | None = None,
+    attempt_count: int = 0,
+) -> str:
+    run_id = begin_ingestion_run(
+        db_path=db_path,
+        pipeline_name=pipeline_name,
+        metadata=metadata,
+        parent_run_id=parent_run_id,
+    )
+    finish_ingestion_run(
+        db_path=db_path,
+        run_id=run_id,
+        status=status,
+        row_count=row_count,
+        metadata=metadata,
+        error_message=error_message,
+        artifact_paths=artifact_paths,
+        attempt_count=attempt_count,
+    )
+    return run_id
+
+
+def begin_ingestion_run(
+    db_path: Path,
+    pipeline_name: str,
+    metadata: dict[str, object] | None = None,
+    *,
+    parent_run_id: str | None = None,
 ) -> str:
     duckdb = _require_duckdb()
     run_id = str(uuid4())
@@ -874,16 +906,22 @@ def record_ingestion_run(
               status,
               row_count,
               metadata_json,
-              started_at
+              started_at,
+              artifact_paths_json,
+              parent_run_id,
+              attempt_count
             )
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
             """,
             (
                 run_id,
                 pipeline_name,
-                status,
-                row_count,
+                "running",
+                0,
                 json.dumps(metadata or {}, sort_keys=True),
+                json.dumps([], sort_keys=True),
+                parent_run_id,
+                0,
             ),
         )
     finally:
@@ -891,12 +929,149 @@ def record_ingestion_run(
     return run_id
 
 
+def finish_ingestion_run(
+    db_path: Path,
+    run_id: str,
+    *,
+    status: str,
+    row_count: int,
+    metadata: dict[str, object] | None = None,
+    error_message: str | None = None,
+    artifact_paths: list[str] | None = None,
+    attempt_count: int = 0,
+) -> None:
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        row = connection.execute(
+            "SELECT started_at FROM ingestion_runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Unknown ingestion run id: {run_id}")
+
+        started_at = _coerce_started_at(row[0])
+        finished_at = datetime.now(timezone.utc)
+        duration_ms = max(int((finished_at - started_at).total_seconds() * 1000), 0)
+
+        connection.execute(
+            """
+            UPDATE ingestion_runs
+            SET
+              status = ?,
+              row_count = ?,
+              metadata_json = ?,
+              finished_at = ?,
+              duration_ms = ?,
+              error_message = ?,
+              artifact_paths_json = ?,
+              attempt_count = ?
+            WHERE run_id = ?
+            """,
+            (
+                status,
+                row_count,
+                json.dumps(metadata or {}, sort_keys=True),
+                finished_at.replace(microsecond=0),
+                duration_ms,
+                error_message,
+                json.dumps(sorted(dict.fromkeys(artifact_paths or [])), sort_keys=True),
+                attempt_count,
+                run_id,
+            ),
+        )
+    finally:
+        connection.close()
+
+
+def list_ingestion_runs(
+    db_path: Path,
+    *,
+    limit: int = 25,
+    pipeline_name: str | None = None,
+    status: str | None = None,
+) -> list[dict[str, object]]:
+    filters: list[str] = []
+    params: list[object] = []
+    if pipeline_name:
+        filters.append("pipeline_name = ?")
+        params.append(pipeline_name)
+    if status:
+        filters.append("status = ?")
+        params.append(status)
+
+    where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
+    params.append(limit)
+    return _fetch_dict_rows(
+        db_path,
+        f"""
+        SELECT
+          run_id,
+          pipeline_name,
+          status,
+          row_count,
+          metadata_json,
+          error_message,
+          artifact_paths_json,
+          parent_run_id,
+          attempt_count,
+          CAST(started_at AS VARCHAR) AS started_at,
+          CAST(finished_at AS VARCHAR) AS finished_at,
+          duration_ms
+        FROM ingestion_runs
+        {where_sql}
+        ORDER BY started_at DESC, run_id DESC
+        LIMIT ?
+        """,
+        params,
+    )
+
+
+def get_latest_successful_runs(
+    db_path: Path,
+    pipeline_names: list[str],
+) -> dict[str, dict[str, object]]:
+    latest: dict[str, dict[str, object]] = {}
+    for pipeline_name in pipeline_names:
+        runs = list_ingestion_runs(
+            db_path,
+            limit=1,
+            pipeline_name=pipeline_name,
+            status="success",
+        )
+        if runs:
+            latest[pipeline_name] = runs[0]
+    return latest
+
+
 def _row_to_dict(columns: list[str], row: tuple[object, ...]) -> dict[str, object]:
     record = dict(zip(columns, row))
-    payload = record.get("explanation_payload")
-    if isinstance(payload, str):
-        try:
-            record["explanation_payload"] = json.loads(payload)
-        except json.JSONDecodeError:
-            pass
+    _parse_json_field(record, "explanation_payload", "explanation_payload")
+    _parse_json_field(record, "metadata_json", "metadata")
+    _parse_json_field(record, "artifact_paths_json", "artifact_paths")
     return record
+
+
+def _parse_json_field(record: dict[str, object], source_key: str, target_key: str) -> None:
+    payload = record.get(source_key)
+    if not isinstance(payload, str):
+        return
+    try:
+        record[target_key] = json.loads(payload)
+    except json.JSONDecodeError:
+        return
+    if target_key != source_key:
+        record.pop(source_key, None)
+
+
+def _coerce_started_at(value: object) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    raise TypeError(f"Unsupported started_at value: {value!r}")

@@ -57,6 +57,16 @@ class DashboardApiTests(unittest.TestCase):
             self.assertIn("built_at", detail_payload)
             self.assertIn("scored_at", detail_payload)
 
+    def test_ingestion_runs_endpoint_returns_run_history(self) -> None:
+        with self._build_client() as client:
+            response = client.get("/ingestion-runs", params={"limit": 10})
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["count"], 1)
+            self.assertEqual(payload["items"][0]["pipeline_name"], "seed_data")
+            self.assertEqual(payload["items"][0]["status"], "success")
+            self.assertEqual(payload["items"][0]["artifact_paths"], ["/tmp/seed.json"])
+
     def test_summary_and_event_detail_can_serve_published_snapshot(self) -> None:
         tempdir = tempfile.TemporaryDirectory()
         root = Path(tempdir.name)
@@ -100,6 +110,14 @@ class DashboardApiTests(unittest.TestCase):
 
         db.init_database(db_path=paths.db_path, schema_dir=Path(__file__).resolve().parents[1] / "sql")
         self._seed_ranked_event(paths.db_path)
+        db.record_ingestion_run(
+            db_path=paths.db_path,
+            pipeline_name="seed_data",
+            status="success",
+            row_count=1,
+            metadata={"source": "unit-test"},
+            artifact_paths=["/tmp/seed.json"],
+        )
 
         patcher = patch("pre_news_trading_surveillance.api.app.default_paths", return_value=paths)
         patcher.start()
