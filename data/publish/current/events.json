@@ -248,7 +248,7 @@
     }
   ],
   "policy": {
-    "cutoff_at": "2026-03-31T13:47:14+00:00",
+    "cutoff_at": "2026-03-31T14:30:58+00:00",
     "data_source_mode": "published",
     "delay_label": "1 day",
     "delay_minutes": 1440,

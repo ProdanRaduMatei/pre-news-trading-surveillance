@@ -1,0 +1,18 @@
+{
+  "ablations": [],
+  "benchmark": {
+    "contamination": null,
+    "control_labels": 0,
+    "fold_count": 0,
+    "k_values": [],
+    "positive_labels": 0,
+    "ranker_enabled": null,
+    "reviewed_events": 0
+  },
+  "generated_at": null,
+  "hybrid": {},
+  "notice": "No published backtest report is currently available. Review benchmark candidates, import labels, and run `pnts run-backtest` to publish evaluation metrics.",
+  "overall": {},
+  "source": {},
+  "status": "pending"
+}
