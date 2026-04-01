@@ -21,8 +21,8 @@ UI_PACKAGE = "pre_news_trading_surveillance.ui"
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     paths = default_paths()
-    paths.ensure_directories()
     if _data_source_mode() != "published":
+        paths.ensure_directories()
         db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
     app_instance.state.rate_limiter = InMemoryRateLimiter(config_from_env())
     yield
