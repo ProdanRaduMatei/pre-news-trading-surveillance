@@ -9,7 +9,7 @@ from . import artifacts, db
 from .events import sec_events
 from .features import daily as daily_features
 from .features import minute as minute_features
-from .ingest import market, sec
+from .ingest import issuer_releases, market, sec
 from .pipeline import refresh as refresh_pipeline
 from .publish import snapshot as publish_snapshot
 from .publish import storage as publish_storage
@@ -151,6 +151,44 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only write filesystem artifacts and skip database loading.",
     )
 
+    ingest_press_releases = subparsers.add_parser(
+        "ingest-press-releases",
+        help="Fetch official issuer press releases or earnings releases from configured RSS/Atom feeds.",
+    )
+    ingest_press_releases.add_argument(
+        "--config",
+        type=Path,
+        required=True,
+        help="Path to the issuer feed TOML config.",
+    )
+    ingest_press_releases.add_argument(
+        "--tickers",
+        nargs="*",
+        help="Optional ticker filter for a subset of configured feeds.",
+    )
+    ingest_press_releases.add_argument(
+        "--per-feed-limit",
+        type=int,
+        default=25,
+        help="Maximum number of feed entries to retain per issuer feed.",
+    )
+    ingest_press_releases.add_argument(
+        "--user-agent",
+        default=market.DEFAULT_USER_AGENT,
+        help="Optional user agent used for issuer feed requests.",
+    )
+    ingest_press_releases.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=30,
+        help="Issuer feed request timeout in seconds.",
+    )
+    ingest_press_releases.add_argument(
+        "--skip-db",
+        action="store_true",
+        help="Only write filesystem artifacts and skip database loading.",
+    )
+
     ingest_market_daily = subparsers.add_parser(
         "ingest-market-daily",
         help="Load daily market bars from a CSV file or provider into storage.",
@@ -260,7 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     build_events = subparsers.add_parser(
         "build-sec-events",
-        help="Build canonical SEC-backed events from raw filing rows.",
+        help="Build canonical official events from SEC filings and issuer press releases.",
     )
     build_events.add_argument(
         "--forms",
@@ -548,6 +586,75 @@ def cmd_ingest_sec_filings(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_press_releases(args: argparse.Namespace) -> int:
+    paths = default_paths()
+    paths.ensure_directories()
+    config_path = args.config
+    if not config_path.is_absolute():
+        config_path = paths.root / config_path
+    if not config_path.exists():
+        raise SystemExit(f"Issuer feed config not found: {config_path}")
+
+    feeds = issuer_releases.load_feed_configs(config_path, tickers=args.tickers)
+    run_context = (
+        tracked_ingestion_run(
+            paths=paths,
+            pipeline_name="issuer_press_releases",
+            metadata={
+                "config_path": str(config_path),
+                "tickers": [feed.ticker for feed in feeds],
+                "per_feed_limit": args.per_feed_limit,
+                "user_agent": args.user_agent,
+            },
+            parent_run_id=getattr(args, "parent_run_id", None),
+        )
+        if not args.skip_db
+        else nullcontext(None)
+    )
+    with run_context as tracker:
+        releases = []
+        raw_paths: dict[str, str] = {}
+        fetch_metrics_by_ticker: dict[str, dict[str, object]] = {}
+        for feed in feeds:
+            fetch_metrics: dict[str, object] = {}
+            xml_text = issuer_releases.fetch_feed_xml(
+                feed.feed_url,
+                user_agent=args.user_agent,
+                timeout_seconds=args.timeout_seconds,
+                metrics=fetch_metrics,
+            )
+            raw_path = issuer_releases.persist_feed_snapshot(paths, feed=feed, xml_text=xml_text)
+            raw_paths[feed.ticker] = str(raw_path)
+            fetch_metrics_by_ticker[feed.ticker] = fetch_metrics
+            ticker_releases = issuer_releases.parse_feed_releases(
+                xml_text,
+                feed=feed,
+                raw_path=raw_path,
+                per_feed_limit=args.per_feed_limit,
+            )
+            releases.extend(ticker_releases)
+            if tracker is not None:
+                tracker.add_artifact(raw_path)
+                tracker.add_attempts(fetch_metrics.get("attempt_count"))
+
+        bronze_path = issuer_releases.persist_release_snapshot(paths, releases)
+        if tracker is not None:
+            db.upsert_raw_issuer_releases(paths.db_path, releases)
+            tracker.row_count = len(releases)
+            tracker.add_artifact(bronze_path)
+            tracker.metadata.update(
+                {
+                    "bronze_path": str(bronze_path),
+                    "raw_paths": raw_paths,
+                    "fetch_metrics_by_ticker": fetch_metrics_by_ticker,
+                }
+            )
+
+    print(f"Stored {len(releases)} issuer release rows")
+    print(f"Bronze snapshot: {bronze_path}")
+    return 0
+
+
 def cmd_ingest_market_daily(args: argparse.Namespace) -> int:
     paths = default_paths()
     paths.ensure_directories()
@@ -739,8 +846,10 @@ def cmd_build_sec_events(args: argparse.Namespace) -> int:
         parent_run_id=getattr(args, "parent_run_id", None),
     ) as tracker:
         filings = db.load_raw_filings(paths.db_path, forms=args.forms)
-        events = sec_events.build_canonical_events_from_filings(
-            filings,
+        press_releases = db.load_raw_issuer_releases(paths.db_path)
+        events = sec_events.build_canonical_events_from_sources(
+            filings=filings,
+            issuer_releases=press_releases,
             sentiment_backend_name=args.sentiment_backend,
             novelty_backend_name=args.novelty_backend,
             sentiment_model=args.sentiment_model,
@@ -748,7 +857,7 @@ def cmd_build_sec_events(args: argparse.Namespace) -> int:
         )
         snapshot_path = artifacts.write_ndjson_snapshot(
             paths.silver_dir / "events",
-            name_prefix="sec_events",
+            name_prefix="official_events",
             rows=[event.as_dict() for event in events],
         )
         inserted = db.upsert_events(paths.db_path, events)
@@ -757,10 +866,11 @@ def cmd_build_sec_events(args: argparse.Namespace) -> int:
         tracker.metadata.update(
             {
                 "input_filings": len(filings),
+                "input_issuer_releases": len(press_releases),
                 "snapshot_path": str(snapshot_path),
                 "upstream_runs": _lineage_snapshot(
                     paths.db_path,
-                    ["sec_filings", "sec_ticker_reference"],
+                    ["sec_filings", "sec_ticker_reference", "issuer_press_releases"],
                 ),
             }
         )
@@ -1027,6 +1137,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_ingest_sec_reference(args)
     if args.command == "ingest-sec-filings":
         return cmd_ingest_sec_filings(args)
+    if args.command == "ingest-press-releases":
+        return cmd_ingest_press_releases(args)
     if args.command == "ingest-market-daily":
         return cmd_ingest_market_daily(args)
     if args.command == "ingest-market-minute":

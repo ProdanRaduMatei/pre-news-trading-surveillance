@@ -78,3 +78,65 @@ class RawFilingRecord:
 
     def as_dict(self) -> dict[str, str | None]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class IssuerFeedConfig:
+    ticker: str
+    issuer_name: str
+    feed_url: str
+    source_name: str
+    official_homepage: str | None = None
+
+    def as_dict(self) -> dict[str, str | None]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class RawIssuerReleaseRecord:
+    release_id: str
+    ticker: str
+    issuer_name: str
+    source_name: str
+    feed_url: str
+    entry_guid: str | None
+    title: str
+    summary_text: str | None
+    source_url: str
+    published_at: str | None
+    raw_path: str
+    ingested_at: str
+
+    def as_db_row(
+        self,
+    ) -> tuple[
+        str,
+        str,
+        str,
+        str,
+        str,
+        str | None,
+        str,
+        str | None,
+        str,
+        str | None,
+        str,
+        str,
+    ]:
+        return (
+            self.release_id,
+            self.ticker,
+            self.issuer_name,
+            self.source_name,
+            self.feed_url,
+            self.entry_guid,
+            self.title,
+            self.summary_text,
+            self.source_url,
+            self.published_at,
+            self.raw_path,
+            self.ingested_at,
+        )
+
+    def as_dict(self) -> dict[str, str | None]:
+        return asdict(self)

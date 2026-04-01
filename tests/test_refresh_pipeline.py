@@ -27,6 +27,13 @@ refresh_reference = false
 per_ticker_limit = 12
 forms = ["8-K"]
 
+[issuer_releases]
+enabled = true
+config_path = "configs/issuer_feeds.example.toml"
+config_path_env = "TEST_ISSUER_FEED_CONFIG"
+user_agent_env = "TEST_ISSUER_UA"
+per_feed_limit = 15
+
 [market]
 provider = "alpha_vantage"
 api_key_env = "TEST_AV_KEY"
@@ -62,6 +69,10 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
         self.assertEqual(config.sec.user_agent_env, "TEST_SEC_UA")
         self.assertFalse(config.sec.refresh_reference)
         self.assertEqual(config.sec.per_ticker_limit, 12)
+        self.assertTrue(config.issuer_releases.enabled)
+        self.assertEqual(config.issuer_releases.config_path, "configs/issuer_feeds.example.toml")
+        self.assertEqual(config.issuer_releases.user_agent_env, "TEST_ISSUER_UA")
+        self.assertEqual(config.issuer_releases.per_feed_limit, 15)
         self.assertEqual(config.market.api_key_env, "TEST_AV_KEY")
         self.assertEqual(config.market.timeout_seconds, 45)
         self.assertEqual(config.market_daily.outputsize, "full")
@@ -95,6 +106,14 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
                     refresh_reference=True,
                     per_ticker_limit=10,
                     forms=["8-K", "6-K"],
+                ),
+                issuer_releases=refresh.IssuerReleaseRefreshConfig(
+                    enabled=True,
+                    config_path="configs/issuer_feeds.example.toml",
+                    config_path_env="PNTS_ISSUER_FEED_CONFIG",
+                    user_agent="Refresh Test Agent/1.0",
+                    user_agent_env="PRESS_RELEASES_USER_AGENT",
+                    per_feed_limit=12,
                 ),
                 market=refresh.MarketProviderConfig(
                     provider="alpha_vantage",
@@ -150,6 +169,10 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
 
                 def cmd_ingest_market_daily(self, _args):
                     self.calls.append("market_daily")
+                    return 0
+
+                def cmd_ingest_press_releases(self, _args):
+                    self.calls.append("press_releases")
                     return 0
 
                 def cmd_ingest_market_minute(self, _args):

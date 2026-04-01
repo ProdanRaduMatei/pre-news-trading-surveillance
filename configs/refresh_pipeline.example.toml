@@ -7,6 +7,14 @@ refresh_reference = true
 per_ticker_limit = 50
 forms = ["8-K", "6-K"]
 
+[issuer_releases]
+enabled = false
+config_path = "configs/issuer_feeds.example.toml"
+config_path_env = "PNTS_ISSUER_FEED_CONFIG"
+user_agent = ""
+user_agent_env = "PRESS_RELEASES_USER_AGENT"
+per_feed_limit = 25
+
 [market]
 provider = "alpha_vantage"
 api_key = ""

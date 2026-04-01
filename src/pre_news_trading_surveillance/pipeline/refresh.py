@@ -13,6 +13,7 @@ RefreshStep = str
 FULL_REFRESH_STEPS: list[RefreshStep] = [
     "sec_reference",
     "sec_filings",
+    "press_releases",
     "market_daily",
     "market_minute",
     "build_events",
@@ -23,6 +24,7 @@ FULL_REFRESH_STEPS: list[RefreshStep] = [
 ]
 INTRADAY_REFRESH_STEPS: list[RefreshStep] = [
     "sec_filings",
+    "press_releases",
     "market_minute",
     "build_events",
     "compute_minute",
@@ -47,6 +49,16 @@ class MarketProviderConfig:
     api_key: str | None
     api_key_env: str
     timeout_seconds: int
+
+
+@dataclass(frozen=True)
+class IssuerReleaseRefreshConfig:
+    enabled: bool
+    config_path: str | None
+    config_path_env: str
+    user_agent: str | None
+    user_agent_env: str
+    per_feed_limit: int
 
 
 @dataclass(frozen=True)
@@ -96,6 +108,7 @@ class PublishRefreshConfig:
 class RefreshPipelineConfig:
     tickers: list[str]
     sec: SecRefreshConfig
+    issuer_releases: IssuerReleaseRefreshConfig
     market: MarketProviderConfig
     market_daily: MarketDailyRefreshConfig
     market_minute: MarketMinuteRefreshConfig
@@ -111,6 +124,7 @@ def load_refresh_config(config_path: Path) -> RefreshPipelineConfig:
         raise ValueError("Refresh config must define at least one ticker.")
 
     sec_payload = payload.get("sec", {})
+    issuer_release_payload = payload.get("issuer_releases", {})
     market_payload = payload.get("market", {})
     market_daily_payload = market_payload.get("daily", {})
     market_minute_payload = market_payload.get("minute", {})
@@ -125,6 +139,18 @@ def load_refresh_config(config_path: Path) -> RefreshPipelineConfig:
             refresh_reference=bool(sec_payload.get("refresh_reference", True)),
             per_ticker_limit=int(sec_payload.get("per_ticker_limit", 50)),
             forms=[str(form).upper() for form in sec_payload.get("forms", ["8-K", "6-K"])],
+        ),
+        issuer_releases=IssuerReleaseRefreshConfig(
+            enabled=bool(issuer_release_payload.get("enabled", False)),
+            config_path=_none_if_blank(issuer_release_payload.get("config_path")),
+            config_path_env=str(
+                issuer_release_payload.get("config_path_env", "PNTS_ISSUER_FEED_CONFIG")
+            ),
+            user_agent=_none_if_blank(issuer_release_payload.get("user_agent")),
+            user_agent_env=str(
+                issuer_release_payload.get("user_agent_env", "PRESS_RELEASES_USER_AGENT")
+            ),
+            per_feed_limit=int(issuer_release_payload.get("per_feed_limit", 25)),
         ),
         market=MarketProviderConfig(
             provider=str(market_payload.get("provider", "alpha_vantage")),
@@ -244,6 +270,29 @@ def run_refresh_pipeline(
                         api_key_env=config.market.api_key_env,
                         outputsize=config.market_daily.outputsize,
                         timeout_seconds=config.market.timeout_seconds,
+                        parent_run_id=refresh_run_id,
+                    ),
+                )
+            elif step == "press_releases":
+                if not config.issuer_releases.enabled:
+                    continue
+                _run_step(
+                    cli_module.cmd_ingest_press_releases,
+                    Namespace(
+                        config=_resolve_required_path(
+                            config.issuer_releases.config_path,
+                            config.issuer_releases.config_path_env,
+                            paths.root,
+                        ),
+                        tickers=config.tickers,
+                        per_feed_limit=config.issuer_releases.per_feed_limit,
+                        user_agent=_resolve_with_default(
+                            config.issuer_releases.user_agent,
+                            config.issuer_releases.user_agent_env,
+                            "PreNewsTradingSurveillance/0.1",
+                        ),
+                        timeout_seconds=config.market.timeout_seconds,
+                        skip_db=False,
                         parent_run_id=refresh_run_id,
                     ),
                 )
@@ -370,6 +419,19 @@ def _resolve_required_value(explicit: str | None, env_name: str) -> str:
     if env_value:
         return env_value
     raise RuntimeError(f"Missing required configuration value. Set `{env_name}` or provide it in config.")
+
+
+def _resolve_required_path(explicit: str | None, env_name: str, root: Path) -> Path:
+    value = _resolve_required_value(explicit, env_name)
+    path = Path(value)
+    if not path.is_absolute():
+        path = root / path
+    return path
+
+
+def _resolve_with_default(explicit: str | None, env_name: str, default: str) -> str:
+    resolved = _resolve_optional_value(explicit, env_name)
+    return resolved or default
 
 
 def _none_if_blank(value: object) -> str | None:

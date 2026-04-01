@@ -10,9 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pre_news_trading_surveillance import db  # noqa: E402
 from pre_news_trading_surveillance.domain import MarketBarDaily  # noqa: E402
-from pre_news_trading_surveillance.events.sec_events import build_canonical_events_from_filings  # noqa: E402
+from pre_news_trading_surveillance.events.sec_events import (  # noqa: E402
+    build_canonical_events_from_filings,
+    build_canonical_events_from_press_releases,
+    build_canonical_events_from_sources,
+)
 from pre_news_trading_surveillance.features.daily import compute_event_market_features  # noqa: E402
-from pre_news_trading_surveillance.ingest.models import RawFilingRecord  # noqa: E402
+from pre_news_trading_surveillance.ingest.models import RawFilingRecord, RawIssuerReleaseRecord  # noqa: E402
 from pre_news_trading_surveillance.nlp.novelty import LexicalNoveltyBackend  # noqa: E402
 from pre_news_trading_surveillance.nlp.sec_taxonomy import classify_event_type  # noqa: E402
 from pre_news_trading_surveillance.scoring.rules import score_event_detail  # noqa: E402
@@ -95,6 +99,51 @@ class EventPipelineTests(unittest.TestCase):
             self.assertIn("summary", payload)
             self.assertIn("classifier_backend", payload["signals"])
             self.assertGreaterEqual(score.suspiciousness_score, 0.0)
+
+    def test_build_press_release_events_and_merge_with_sec(self) -> None:
+        filing = RawFilingRecord(
+            filing_id="0001:filing",
+            ticker="AAPL",
+            cik="0000320193",
+            company_name="Apple Inc.",
+            accession_no="0000320193-24-000001",
+            form_type="8-K",
+            filing_date="2024-01-15",
+            accepted_at="2024-01-15T13:30:00+00:00",
+            items_json='["2.02", "9.01"]',
+            primary_document="earnings.htm",
+            primary_doc_description="Results of Operations",
+            source_url="https://example.com/earnings.htm",
+            raw_path="/tmp/raw.json",
+            ingested_at="2024-01-15T13:31:00+00:00",
+        )
+        release = RawIssuerReleaseRecord(
+            release_id="issuer-release:AAPL:abcd1234",
+            ticker="AAPL",
+            issuer_name="Apple Inc.",
+            source_name="Apple Newsroom",
+            feed_url="https://example.com/feed.xml",
+            entry_guid="apple-q1-results",
+            title="Apple Reports First Quarter Results",
+            summary_text="Apple today announced financial results for its first quarter.",
+            source_url="https://example.com/apple-q1-results",
+            published_at="2024-01-30T21:30:00+00:00",
+            raw_path="/tmp/feed.xml",
+            ingested_at="2024-01-30T21:31:00+00:00",
+        )
+
+        press_events = build_canonical_events_from_press_releases([release])
+        self.assertEqual(len(press_events), 1)
+        self.assertEqual(press_events[0].source_table, "raw_issuer_releases")
+        self.assertEqual(press_events[0].event_type, "earnings")
+
+        merged_events = build_canonical_events_from_sources(
+            filings=[filing],
+            issuer_releases=[release],
+        )
+        self.assertEqual(len(merged_events), 2)
+        self.assertEqual({event.source_table for event in merged_events}, {"raw_filings", "raw_issuer_releases"})
+        self.assertTrue(all(event.official_source_flag for event in merged_events))
 
 
 if __name__ == "__main__":

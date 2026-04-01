@@ -1,0 +1,22 @@
+# Copy this file and replace `feed_url` values with official issuer newsroom or investor-relations RSS/Atom feeds.
+
+[[feeds]]
+ticker = "AAPL"
+issuer_name = "Apple Inc."
+source_name = "Apple Newsroom"
+feed_url = "https://example.com/apple-newsroom.rss"
+official_homepage = "https://www.apple.com/newsroom/"
+
+[[feeds]]
+ticker = "MSFT"
+issuer_name = "Microsoft Corporation"
+source_name = "Microsoft Stories"
+feed_url = "https://example.com/microsoft-stories.xml"
+official_homepage = "https://news.microsoft.com/"
+
+[[feeds]]
+ticker = "NVDA"
+issuer_name = "NVIDIA Corporation"
+source_name = "NVIDIA Newsroom"
+feed_url = "https://example.com/nvidia-newsroom.xml"
+official_homepage = "https://nvidianews.nvidia.com/"

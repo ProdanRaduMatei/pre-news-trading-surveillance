@@ -13,7 +13,7 @@ from .domain import (
     MarketBarDaily,
     MarketBarMinute,
 )
-from .ingest.models import RawFilingRecord, TickerReference
+from .ingest.models import RawFilingRecord, RawIssuerReleaseRecord, TickerReference
 
 
 def _require_duckdb():
@@ -138,6 +138,47 @@ def upsert_raw_filings(db_path: Path, filings: list[RawFilingRecord]) -> int:
     finally:
         connection.close()
     return len(filings)
+
+
+def upsert_raw_issuer_releases(db_path: Path, releases: list[RawIssuerReleaseRecord]) -> int:
+    if not releases:
+        return 0
+
+    duckdb = _require_duckdb()
+    connection = duckdb.connect(str(db_path))
+    try:
+        connection.begin()
+        connection.executemany(
+            "DELETE FROM raw_issuer_releases WHERE release_id = ?",
+            [(release.release_id,) for release in releases],
+        )
+        connection.executemany(
+            """
+            INSERT INTO raw_issuer_releases (
+              release_id,
+              ticker,
+              issuer_name,
+              source_name,
+              feed_url,
+              entry_guid,
+              title,
+              summary_text,
+              source_url,
+              published_at,
+              raw_path,
+              ingested_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [release.as_db_row() for release in releases],
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return len(releases)
 
 
 def upsert_market_bars_daily(db_path: Path, bars: list[MarketBarDaily]) -> int:
@@ -457,6 +498,63 @@ def load_raw_filings(
     ]
 
 
+def load_raw_issuer_releases(
+    db_path: Path,
+    ticker: str | None = None,
+    limit: int | None = None,
+) -> list[RawIssuerReleaseRecord]:
+    duckdb = _require_duckdb()
+    query = """
+        SELECT
+          release_id,
+          ticker,
+          issuer_name,
+          source_name,
+          feed_url,
+          entry_guid,
+          title,
+          summary_text,
+          source_url,
+          CAST(published_at AS VARCHAR) AS published_at,
+          raw_path,
+          CAST(ingested_at AS VARCHAR) AS ingested_at
+        FROM raw_issuer_releases
+        WHERE 1 = 1
+    """
+    params: list[object] = []
+    if ticker:
+        query += " AND ticker = ?"
+        params.append(ticker.upper())
+    query += " ORDER BY COALESCE(published_at, ingested_at) ASC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+
+    connection = duckdb.connect(str(db_path))
+    try:
+        rows = connection.execute(query, params).fetchall()
+    finally:
+        connection.close()
+
+    return [
+        RawIssuerReleaseRecord(
+            release_id=row[0],
+            ticker=row[1],
+            issuer_name=row[2],
+            source_name=row[3],
+            feed_url=row[4],
+            entry_guid=row[5],
+            title=row[6],
+            summary_text=row[7],
+            source_url=row[8],
+            published_at=row[9],
+            raw_path=row[10],
+            ingested_at=row[11],
+        )
+        for row in rows
+    ]
+
+
 def load_events(
     db_path: Path,
     ticker: str | None = None,
@@ -647,6 +745,7 @@ def list_ranked_events(
     query = """
         SELECT
           e.event_id,
+          e.source_table,
           e.ticker,
           e.issuer_name,
           CAST(e.first_public_at AS VARCHAR) AS first_public_at,

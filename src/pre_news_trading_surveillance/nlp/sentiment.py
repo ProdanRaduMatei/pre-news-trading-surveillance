@@ -12,6 +12,9 @@ POSITIVE_KEYWORDS = {
     "dividend": 0.25,
     "results": 0.2,
     "raises outlook": 0.6,
+    "reaffirms outlook": 0.35,
+    "financial results": 0.2,
+    "reports earnings": 0.2,
 }
 NEGATIVE_KEYWORDS = {
     "litigation": -0.45,
@@ -22,6 +25,7 @@ NEGATIVE_KEYWORDS = {
     "bankruptcy": -0.9,
     "restatement": -0.7,
     "guidance cut": -0.65,
+    "withdraws outlook": -0.7,
     "non-reliance": -0.85,
 }
 POSITIVE_ITEMS = {"2.01", "7.01"}

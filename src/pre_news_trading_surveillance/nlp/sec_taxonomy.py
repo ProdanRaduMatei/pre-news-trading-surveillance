@@ -27,13 +27,13 @@ SEC_ITEM_EVENT_TYPE = {
 }
 
 EVENT_TYPE_KEYWORDS = (
-    ("mna", ("acquisition", "merger", "combination", "purchase agreement", "business combination")),
-    ("guidance", ("guidance", "outlook", "forecast", "expects", "raises outlook", "cuts outlook")),
-    ("earnings", ("results of operations", "earnings", "financial condition", "quarterly results")),
-    ("executive_change", ("departure of directors", "appointment", "resignation", "chief executive", "officer")),
-    ("financing", ("equity securities", "debt", "financing", "credit agreement", "offering", "convertible notes")),
+    ("mna", ("acquisition", "merger", "combination", "purchase agreement", "business combination", "definitive agreement to acquire")),
+    ("guidance", ("guidance", "outlook", "forecast", "expects", "raises outlook", "cuts outlook", "reaffirms outlook", "provides outlook", "withdraws outlook")),
+    ("earnings", ("results of operations", "earnings", "financial condition", "quarterly results", "financial results", "reports results", "reports earnings", "first quarter results", "second quarter results", "third quarter results", "fourth quarter results")),
+    ("executive_change", ("departure of directors", "appointment", "resignation", "chief executive", "officer", "chief financial officer", "board of directors")),
+    ("financing", ("equity securities", "debt", "financing", "credit agreement", "offering", "convertible notes", "private placement", "term loan")),
     ("litigation_regulatory", ("lawsuit", "litigation", "subpoena", "investigation", "delisting", "regulatory", "non-reliance")),
-    ("major_business_event", ("material definitive agreement", "partnership", "approval", "contract", "launch", "agreement")),
+    ("major_business_event", ("material definitive agreement", "partnership", "approval", "contract", "launch", "agreement", "collaboration", "commercial launch", "product launch")),
 )
 
 GENERIC_ITEMS = {"7.01", "8.01", "9.01"}
@@ -84,6 +84,9 @@ def classify_event_type(
     if form_type.upper() == "8-K":
         reasons.append("form_type:8-K")
         return EventTypeResult("major_business_event", 0.5, "form_type_fallback", reasons)
+    if form_type.upper() == "PRESS_RELEASE":
+        reasons.append("source_type:press_release")
+        return EventTypeResult("major_business_event", 0.45, "official_release_fallback", reasons)
 
     reasons.append("fallback:other")
     return EventTypeResult("other", 0.35, "fallback_rules", reasons)

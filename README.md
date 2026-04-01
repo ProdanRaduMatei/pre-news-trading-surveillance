@@ -18,6 +18,7 @@ Pre-News Trading Surveillance is a public-facing research platform for ranking u
   - bootstraps the local data lake and DuckDB database
   - downloads the SEC ticker reference map
   - fetches SEC submissions for requested tickers
+  - fetches official issuer press releases and earnings releases from configured RSS/Atom feeds
   - stores raw payloads in `data/raw`
   - writes normalized filing rows to `data/bronze`
   - loads normalized rows into DuckDB tables
@@ -79,6 +80,12 @@ pnts ingest-sec-filings \
   --user-agent "Your Name your-email@example.com" \
   --tickers AAPL MSFT NVDA \
   --forms 8-K 6-K
+```
+
+Ingest official issuer press releases or earnings releases from configured feeds:
+
+```bash
+pnts ingest-press-releases --config configs/issuer_feeds.example.toml --tickers AAPL MSFT
 ```
 
 Import daily market bars from a CSV with headers `ticker,date,open,high,low,close,volume`:
@@ -156,6 +163,7 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - `pnts bootstrap`
 - `pnts ingest-sec-reference --user-agent "..."`
 - `pnts ingest-sec-filings --user-agent "..." --tickers AAPL MSFT`
+- `pnts ingest-press-releases --config configs/issuer_feeds.example.toml --tickers AAPL MSFT`
 - `pnts ingest-market-daily --csv /path/to/file.csv`
 - `pnts ingest-market-minute --csv /path/to/file.csv`
 - `pnts ingest-market-daily --provider alpha_vantage --tickers AAPL MSFT`
@@ -176,6 +184,7 @@ Then open [http://127.0.0.1:8000](http://127.0.0.1:8000) for the public dashboar
 - The repo stores raw provider CSV snapshots under `data/raw/market/alpha_vantage/` before loading normalized rows into DuckDB.
 - Local CSV imports are copied into `data/raw/market/csv/` so feature and score batches remain reproducible even when the original source file changes.
 - SEC and provider pulls now use bounded retry logic with rate-limit awareness, and each run records attempts, artifacts, and final status in DuckDB.
+- Official issuer releases are ingested from configurable RSS/Atom feeds defined in [issuer_feeds.example.toml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/configs/issuer_feeds.example.toml).
 
 ## Public Dashboard
 
@@ -190,10 +199,14 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 
 - The repo now includes a config-driven orchestrator at `pnts refresh-pipeline`.
 - The sample config lives at [configs/refresh_pipeline.example.toml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/configs/refresh_pipeline.example.toml).
+- Official issuer feed config lives at [configs/issuer_feeds.example.toml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/configs/issuer_feeds.example.toml).
 - GitHub Actions scheduling lives at [.github/workflows/refresh.yml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/.github/workflows/refresh.yml).
 - The workflow assumes two repository secrets:
   - `SEC_USER_AGENT`
   - `ALPHAVANTAGE_API_KEY`
+- Optional issuer feed settings can also be supplied through:
+  - `PNTS_ISSUER_FEED_CONFIG`
+  - `PRESS_RELEASES_USER_AGENT`
 - Default schedules:
   - weekday hourly intraday refresh at `15` minutes past the hour UTC
   - weekday full refresh at `22:25 UTC`
