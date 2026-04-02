@@ -12,6 +12,7 @@ data/raw/*
 data/bronze/*
 data/silver/*
 data/gold/*
+data/models/*
 
 !data/raw/.gitkeep
 !data/bronze/.gitkeep

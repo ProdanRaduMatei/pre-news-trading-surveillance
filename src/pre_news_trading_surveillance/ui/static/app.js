@@ -159,7 +159,7 @@ async function loadSummary() {
     renderTopTickers(summary.top_tickers || []);
     renderActivity(summary.recent_activity || []);
     renderPolicy(summary.policy || {});
-    renderEvaluation(summary.evaluation || null);
+    renderEvaluation(summary.evaluation || null, summary.model || null);
   } catch (error) {
     renderFailure(elements.scoreBandChart, "Unable to load summary panels.");
     renderFailure(elements.eventTypeChart, "Unable to load event categories.");
@@ -285,7 +285,7 @@ function renderPolicy(policy) {
   `;
 }
 
-function renderEvaluation(evaluation) {
+function renderEvaluation(evaluation, model) {
   if (!evaluation || evaluation.status !== "available") {
     elements.evaluationPanel.innerHTML = `
       <div class="evaluation-pending">
@@ -306,6 +306,8 @@ function renderEvaluation(evaluation) {
   const benchmark = evaluation.benchmark || {};
   const hybrid = evaluation.hybrid || {};
   const precisionAt = hybrid.precision_at || {};
+  const modelStatus = model || {};
+  const modelCaption = buildModelCaption(modelStatus);
 
   elements.evaluationPanel.innerHTML = `
     <div class="evaluation-grid">
@@ -329,11 +331,22 @@ function renderEvaluation(evaluation) {
         <strong>${formatInteger(benchmark.fold_count)}</strong>
         <span class="detail-meta">Chronological backtest</span>
       </article>
+      <article class="detail-stat">
+        <span class="detail-label">Live engine</span>
+        <strong>${escapeHtml((modelStatus.engine_used || "rules").toUpperCase())}</strong>
+        <span class="detail-meta">${escapeHtml(modelCaption)}</span>
+      </article>
+      <article class="detail-stat">
+        <span class="detail-label">Ranker source</span>
+        <strong>${escapeHtml(formatRankerSource(modelStatus.ranker_training_source))}</strong>
+        <span class="detail-meta">${escapeHtml(modelStatus.ranker_status || "No ranker")}</span>
+      </article>
     </div>
     <p class="legend-note">${escapeHtml(
       evaluation.notice ||
         "Metrics are reported on reviewed suspicious versus control events and should be interpreted as ranking quality signals.",
     )}</p>
+    <p class="legend-note">${escapeHtml(modelStatus.notice || "Model freshness metadata is unavailable for this snapshot.")}</p>
   `;
 }
 
@@ -349,6 +362,29 @@ function renderOverview(overview) {
   elements.freshnessPill.textContent = overview.last_scored_at
     ? `Updated ${formatRelativeDate(overview.last_scored_at)}`
     : "Awaiting scored events";
+}
+
+function buildModelCaption(model) {
+  if (!model || !model.status || model.status === "pending") {
+    return "Model metadata unavailable";
+  }
+  if (model.trained_at) {
+    return `Trained ${formatDateTime(model.trained_at)}`;
+  }
+  return model.status === "rules_only" ? "Rules-only fallback" : "Model available";
+}
+
+function formatRankerSource(value) {
+  if (!value) {
+    return "Unavailable";
+  }
+  if (value === "reviewed_labels") {
+    return "Reviewed labels";
+  }
+  if (value === "weak_labels") {
+    return "Weak labels";
+  }
+  return value.replace(/_/g, " ");
 }
 
 function renderScoreBands(items) {

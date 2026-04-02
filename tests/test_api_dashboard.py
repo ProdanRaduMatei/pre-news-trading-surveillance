@@ -45,6 +45,7 @@ class DashboardApiTests(unittest.TestCase):
             self.assertEqual(len(summary_payload["score_bands"]), 1)
             self.assertFalse(summary_payload["policy"]["public_safe_mode"])
             self.assertEqual(summary_payload["evaluation"]["status"], "available")
+            self.assertEqual(summary_payload["model"]["status"], "pending")
 
             events_response = client.get("/events", params={"limit": 10, "offset": 0, "min_score": 0})
             self.assertEqual(events_response.status_code, 200)
@@ -84,6 +85,10 @@ class DashboardApiTests(unittest.TestCase):
             self.assertEqual(evaluation_summary.status_code, 200)
             self.assertEqual(evaluation_summary.json()["evaluation"]["status"], "available")
 
+            model_summary = client.get("/model/summary")
+            self.assertEqual(model_summary.status_code, 200)
+            self.assertEqual(model_summary.json()["model"]["status"], "pending")
+
     def test_ingestion_runs_endpoint_returns_run_history(self) -> None:
         with self._build_client() as client:
             response = client.get("/ingestion-runs", params={"limit": 10, "pipeline_name": "seed_data"})
@@ -120,6 +125,7 @@ class DashboardApiTests(unittest.TestCase):
                     self.assertEqual(summary_response.status_code, 200)
                     self.assertEqual(summary_response.json()["overview"]["total_events"], 1)
                     self.assertEqual(summary_response.json()["evaluation"]["status"], "available")
+                    self.assertEqual(summary_response.json()["model"]["status"], "pending")
 
                     events_response = client.get("/events")
                     self.assertEqual(events_response.status_code, 200)

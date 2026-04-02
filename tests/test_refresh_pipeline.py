@@ -53,6 +53,26 @@ extended_hours = false
 sentiment_backend = "finbert"
 novelty_backend = "lexical"
 
+[model]
+enabled = true
+output_dir = "data/models/scoring/current"
+contamination = 0.15
+min_samples = 18
+use_ranker = false
+review_status = "reviewed"
+benchmark_labels = ["suspicious", "control"]
+
+[evaluation]
+enabled = true
+review_status = "reviewed"
+benchmark_labels = ["suspicious", "control"]
+folds = 4
+min_train_size = 30
+k_values = [5, 20]
+contamination = 0.11
+use_ranker = false
+output_dir = "reports/evaluation"
+
 [publish]
 enabled = true
 output_dir = "data/publish/current"
@@ -81,6 +101,11 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
         self.assertFalse(config.market_minute.enabled)
         self.assertEqual(config.market_minute.interval, "5min")
         self.assertEqual(config.nlp.sentiment_backend, "finbert")
+        self.assertTrue(config.model.enabled)
+        self.assertEqual(config.model.min_samples, 18)
+        self.assertFalse(config.model.use_ranker)
+        self.assertEqual(config.evaluation.folds, 4)
+        self.assertEqual(config.evaluation.k_values, [5, 20])
         self.assertTrue(config.publish.enabled)
         self.assertEqual(config.publish.output_dir, "data/publish/current")
         self.assertEqual(config.publish.max_events, 75)
@@ -141,6 +166,28 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
                     novelty_backend="lexical",
                     novelty_model=None,
                 ),
+                model=refresh.ModelRefreshConfig(
+                    enabled=True,
+                    output_dir="data/models/scoring/current",
+                    contamination=0.12,
+                    min_samples=4,
+                    use_ranker=True,
+                    review_status="reviewed",
+                    benchmark_labels=["suspicious", "control"],
+                    reviewer=None,
+                ),
+                evaluation=refresh.EvaluationRefreshConfig(
+                    enabled=True,
+                    review_status="reviewed",
+                    benchmark_labels=["suspicious", "control"],
+                    reviewer=None,
+                    folds=2,
+                    min_train_size=2,
+                    k_values=[5, 10],
+                    contamination=0.12,
+                    use_ranker=True,
+                    output_dir="reports/evaluation",
+                ),
                 publish=refresh.PublishRefreshConfig(
                     enabled=True,
                     output_dir="data/publish/current",
@@ -197,8 +244,16 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
                     self.calls.append("compute_minute")
                     return 0
 
+                def cmd_train_model_stack(self, _args):
+                    self.calls.append("train_model")
+                    return 0
+
                 def cmd_score_events(self, _args):
                     self.calls.append("score")
+                    return 0
+
+                def cmd_run_backtest(self, _args):
+                    self.calls.append("backtest")
                     return 0
 
                 def cmd_publish_snapshot(self, _args):
@@ -206,6 +261,47 @@ s3_bucket_env = "TEST_PUBLISH_BUCKET"
                     return 0
 
             cli_module = DummyCli()
+
+            db.record_ingestion_run(
+                db_path=paths.db_path,
+                pipeline_name="score_events",
+                status="success",
+                row_count=4,
+            )
+            duckdb = db._require_duckdb()
+            connection = duckdb.connect(str(paths.db_path))
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO events (
+                      event_id, source_event_id, source_table, ticker, issuer_name, first_public_at, event_date,
+                      event_type, sentiment_label, sentiment_score, title, summary, source_url, primary_document,
+                      sec_items_json, official_source_flag, timestamp_confidence, classifier_backend,
+                      sentiment_backend, novelty_backend, source_quality, novelty, impact_score, built_at
+                    )
+                    VALUES
+                      ('evt-1','src-1','raw_filings','AAPL','Apple Inc.','2024-01-01T10:00:00+00:00','2024-01-01','earnings','positive',0.8,'Title 1','Summary 1','https://example.com/1','doc1','[]',true,'high','rules','heuristic','lexical',0.9,0.2,0.8,'2024-01-01T10:05:00+00:00'),
+                      ('evt-2','src-2','raw_filings','MSFT','Microsoft Corp.','2024-01-02T10:00:00+00:00','2024-01-02','earnings','negative',-0.4,'Title 2','Summary 2','https://example.com/2','doc2','[]',true,'high','rules','heuristic','lexical',0.9,0.3,0.6,'2024-01-02T10:05:00+00:00'),
+                      ('evt-3','src-3','raw_filings','AAPL','Apple Inc.','2024-01-03T10:00:00+00:00','2024-01-03','mna','positive',0.5,'Title 3','Summary 3','https://example.com/3','doc3','[]',true,'high','rules','heuristic','lexical',0.9,0.6,0.9,'2024-01-03T10:05:00+00:00'),
+                      ('evt-4','src-4','raw_filings','MSFT','Microsoft Corp.','2024-01-04T10:00:00+00:00','2024-01-04','other','neutral',0.0,'Title 4','Summary 4','https://example.com/4','doc4','[]',true,'high','rules','heuristic','lexical',0.9,0.1,0.2,'2024-01-04T10:05:00+00:00')
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO benchmark_event_labels (
+                      event_id, benchmark_label, review_status, reviewer, label_source, confidence,
+                      review_notes, metadata_json, created_at, updated_at
+                    )
+                    VALUES
+                      ('evt-1','suspicious','reviewed','tester','manual_review',0.9,'','{}','2024-01-04T00:00:00+00:00','2024-01-04T00:00:00+00:00'),
+                      ('evt-2','control','reviewed','tester','manual_review',0.9,'','{}','2024-01-04T00:00:00+00:00','2024-01-04T00:00:00+00:00'),
+                      ('evt-3','suspicious','reviewed','tester','manual_review',0.9,'','{}','2024-01-04T00:00:00+00:00','2024-01-04T00:00:00+00:00'),
+                      ('evt-4','control','reviewed','tester','manual_review',0.9,'','{}','2024-01-04T00:00:00+00:00','2024-01-04T00:00:00+00:00')
+                    """
+                )
+            finally:
+                connection.close()
+
             completed = refresh.run_refresh_pipeline(
                 config=config,
                 steps=refresh.FULL_REFRESH_STEPS,

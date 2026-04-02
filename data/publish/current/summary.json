@@ -1,173 +1,199 @@
 {
   "event_types": [
     {
-      "average_score": 35.32,
+      "average_score": 33.71,
       "event_count": 720,
       "event_type": "earnings",
-      "peak_score": 57.82
+      "peak_score": 62.46
     },
     {
-      "average_score": 28.88,
-      "event_count": 437,
+      "average_score": 32.27,
+      "event_count": 438,
       "event_type": "other",
-      "peak_score": 48.82
+      "peak_score": 65.55
     },
     {
-      "average_score": 29.86,
+      "average_score": 29.15,
       "event_count": 399,
       "event_type": "executive_change",
-      "peak_score": 54.07
+      "peak_score": 64.12
     },
     {
-      "average_score": 31.72,
+      "average_score": 36.97,
       "event_count": 362,
       "event_type": "major_business_event",
-      "peak_score": 35.5
+      "peak_score": 64.03
     },
     {
-      "average_score": 32.23,
+      "average_score": 41.42,
       "event_count": 53,
       "event_type": "financing",
-      "peak_score": 36.25
+      "peak_score": 61.31
     },
     {
-      "average_score": 35.23,
+      "average_score": 57.52,
       "event_count": 16,
       "event_type": "mna",
-      "peak_score": 39.25
+      "peak_score": 63.51
     },
     {
-      "average_score": 32.5,
+      "average_score": 42.02,
       "event_count": 5,
       "event_type": "litigation_regulatory",
-      "peak_score": 37.0
+      "peak_score": 51.66
     }
   ],
+  "model": {
+    "engine_requested": "auto",
+    "engine_used": "hybrid",
+    "feature_count": 27,
+    "notice": "The latest successful scoring run used the trained anomaly stack. The LightGBM ranker was trained on reviewed suspicious/control benchmark labels.",
+    "ranker_enabled": true,
+    "ranker_reason": "",
+    "ranker_status": "trained",
+    "ranker_training_source": "reviewed_labels",
+    "reviewed_control_labels": 12,
+    "reviewed_label_count": 24,
+    "reviewed_positive_labels": 12,
+    "score_run": {
+      "finished_at": "2026-04-02 08:42:47",
+      "run_id": "378add61-99fa-45e0-ae14-90b122ee3501",
+      "started_at": "2026-04-02 08:42:40.794193"
+    },
+    "status": "available",
+    "train_run": {
+      "finished_at": "2026-04-02 08:42:40",
+      "run_id": "2b2162a0-3887-4a19-8a63-96fddeb2049f",
+      "started_at": "2026-04-02 08:42:39.893955"
+    },
+    "trained_at": "2026-04-02T05:42:40+00:00",
+    "training_samples": 1993
+  },
   "overview": {
-    "average_score": 32.07,
-    "coverage_end": "2026-03-27 18:10:53",
+    "average_score": 33.49,
+    "coverage_end": "2026-03-31 17:52:12",
     "coverage_start": "2015-03-23 10:55:17",
     "high_risk_events": 0,
     "last_built_at": "2026-04-01 14:42:10",
-    "last_scored_at": "2026-04-01 14:42:19",
-    "low_risk_events": 1988,
-    "medium_risk_events": 4,
-    "peak_score": 57.82,
-    "total_events": 1992,
+    "last_scored_at": "2026-04-02 05:42:47",
+    "low_risk_events": 1551,
+    "medium_risk_events": 442,
+    "peak_score": 65.55,
+    "total_events": 1993,
     "tracked_tickers": 31
   },
   "recent_activity": [
     {
-      "average_score": 28.0,
-      "event_count": 1,
-      "event_day": "2026-03-09 00:00:00"
-    },
-    {
-      "average_score": 37.75,
+      "average_score": 26.4,
       "event_count": 1,
       "event_day": "2026-03-10 00:00:00"
     },
     {
-      "average_score": 35.5,
+      "average_score": 47.08,
       "event_count": 1,
       "event_day": "2026-03-11 00:00:00"
     },
     {
-      "average_score": 33.5,
+      "average_score": 33.07,
       "event_count": 3,
       "event_day": "2026-03-12 00:00:00"
     },
     {
-      "average_score": 27.92,
+      "average_score": 26.65,
       "event_count": 3,
       "event_day": "2026-03-13 00:00:00"
     },
     {
-      "average_score": 29.42,
+      "average_score": 29.72,
       "event_count": 3,
       "event_day": "2026-03-16 00:00:00"
     },
     {
-      "average_score": 26.5,
+      "average_score": 19.23,
       "event_count": 1,
       "event_day": "2026-03-20 00:00:00"
     },
     {
-      "average_score": 32.5,
+      "average_score": 47.49,
       "event_count": 1,
       "event_day": "2026-03-24 00:00:00"
     },
     {
-      "average_score": 35.5,
+      "average_score": 47.08,
       "event_count": 1,
       "event_day": "2026-03-25 00:00:00"
     },
     {
-      "average_score": 25.0,
+      "average_score": 25.1,
       "event_count": 1,
       "event_day": "2026-03-27 00:00:00"
+    },
+    {
+      "average_score": 47.49,
+      "event_count": 1,
+      "event_day": "2026-03-31 00:00:00"
     }
   ],
   "score_bands": [
     {
-      "average_score": 53.7,
-      "event_count": 4,
+      "average_score": 49.29,
+      "event_count": 442,
       "score_band": "Medium"
     },
     {
-      "average_score": 32.02,
-      "event_count": 1988,
+      "average_score": 28.99,
+      "event_count": 1551,
       "score_band": "Low"
     }
   ],
   "top_tickers": [
     {
-      "average_score": 34.42,
+      "average_score": 47.46,
       "event_count": 80,
-      "peak_score": 57.82,
+      "peak_score": 65.55,
+      "ticker": "PG"
+    },
+    {
+      "average_score": 29.26,
+      "event_count": 80,
+      "peak_score": 64.12,
       "ticker": "AAPL"
     },
     {
-      "average_score": 32.08,
+      "average_score": 31.74,
       "event_count": 80,
-      "peak_score": 39.25,
-      "ticker": "HD"
+      "peak_score": 63.51,
+      "ticker": "DKS"
     },
     {
-      "average_score": 34.35,
+      "average_score": 32.16,
       "event_count": 80,
-      "peak_score": 39.25,
-      "ticker": "KODK"
+      "peak_score": 63.51,
+      "ticker": "JNJ"
     },
     {
-      "average_score": 33.91,
+      "average_score": 36.36,
       "event_count": 80,
-      "peak_score": 39.25,
-      "ticker": "ORCL"
+      "peak_score": 63.51,
+      "ticker": "XOM"
     },
     {
-      "average_score": 32.17,
+      "average_score": 37.79,
       "event_count": 80,
-      "peak_score": 37.75,
-      "ticker": "ABBV"
-    },
-    {
-      "average_score": 31.62,
-      "event_count": 80,
-      "peak_score": 37.75,
+      "peak_score": 63.4,
       "ticker": "AMD"
     },
     {
-      "average_score": 30.93,
+      "average_score": 33.8,
       "event_count": 80,
-      "peak_score": 37.75,
+      "peak_score": 61.31,
       "ticker": "CMTL"
     },
     {
-      "average_score": 31.99,
+      "average_score": 36.69,
       "event_count": 80,
-      "peak_score": 37.75,
-      "ticker": "COST"
+      "peak_score": 61.31,
+      "ticker": "KODK"
     }
   ]
 }

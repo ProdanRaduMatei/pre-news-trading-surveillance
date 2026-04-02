@@ -397,6 +397,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         help="Whether to train the LightGBM ranker on top of the anomaly features.",
     )
+    train_model_stack.add_argument(
+        "--review-status",
+        default="reviewed",
+        help="Benchmark review status to use when attaching reviewed labels for supervised ranker training.",
+    )
+    train_model_stack.add_argument(
+        "--benchmark-labels",
+        nargs="*",
+        default=["suspicious", "control"],
+        help="Benchmark labels eligible for reviewed-label ranker training.",
+    )
+    train_model_stack.add_argument(
+        "--reviewer",
+        help="Optional reviewer filter for reviewed-label ranker training.",
+    )
 
     export_benchmark_candidates = subparsers.add_parser(
         "export-benchmark-candidates",
@@ -1178,10 +1193,21 @@ def cmd_train_model_stack(args: argparse.Namespace) -> int:
             "contamination": args.contamination,
             "min_samples": args.min_samples,
             "use_ranker": args.use_ranker,
+            "review_status": args.review_status,
+            "benchmark_labels": args.benchmark_labels,
+            "reviewer": args.reviewer,
         },
         parent_run_id=getattr(args, "parent_run_id", None),
     ) as tracker:
         details = db.load_scoring_event_details(paths.db_path, ticker=args.ticker)
+        details = _attach_latest_benchmark_labels(
+            paths.db_path,
+            details,
+            review_status=args.review_status,
+            benchmark_labels=args.benchmark_labels,
+            reviewer=args.reviewer,
+        )
+        label_coverage = _benchmark_label_coverage(details)
         inputs_snapshot_path = artifacts.write_ndjson_snapshot(
             paths.silver_dir / "scoring",
             name_prefix="training_inputs",
@@ -1201,6 +1227,7 @@ def cmd_train_model_stack(args: argparse.Namespace) -> int:
         tracker.metadata.update(
             {
                 "training_samples": len(details),
+                "reviewed_label_coverage": label_coverage,
                 "inputs_snapshot_path": str(inputs_snapshot_path),
                 "model_manifest": trained.manifest,
                 "upstream_runs": _lineage_snapshot(
@@ -1371,6 +1398,7 @@ def cmd_publish_snapshot(args: argparse.Namespace) -> int:
         tracker.add_artifact(output_dir / "manifest.json")
         tracker.add_artifact(output_dir / "summary.json")
         tracker.add_artifact(output_dir / "evaluation_summary.json")
+        tracker.add_artifact(output_dir / "model_summary.json")
         tracker.add_artifact(output_dir / "events.json")
         tracker.metadata.update(
             {
@@ -1378,7 +1406,12 @@ def cmd_publish_snapshot(args: argparse.Namespace) -> int:
                 "manifest_generated_at": bundle.manifest["generated_at"],
                 "policy": bundle.manifest.get("policy", {}),
                 "evaluation_status": bundle.manifest.get("evaluation_status"),
-                "upstream_runs": _lineage_snapshot(paths.db_path, ["score_events"]),
+                "model_status": bundle.manifest.get("model_status"),
+                "engine_used": bundle.manifest.get("engine_used"),
+                "upstream_runs": _lineage_snapshot(
+                    paths.db_path,
+                    ["train_model_stack", "score_events", "run_backtest"],
+                ),
             }
         )
         print(f"Published snapshot bundle with {len(bundle.events)} events to {output_dir}")
@@ -1482,6 +1515,58 @@ def _lineage_snapshot(db_path: Path, pipeline_names: list[str]) -> dict[str, dic
             "attempt_count": run.get("attempt_count", 0),
         }
     return lineage
+
+
+def _attach_latest_benchmark_labels(
+    db_path: Path,
+    details: list[dict[str, object]],
+    *,
+    review_status: str,
+    benchmark_labels: list[str] | None,
+    reviewer: str | None,
+) -> list[dict[str, object]]:
+    latest_labels = db.load_latest_benchmark_labels(
+        db_path,
+        review_status=review_status,
+        benchmark_labels=benchmark_labels,
+        reviewer=reviewer,
+    )
+    labels_by_event = {str(label["event_id"]): label for label in latest_labels}
+    merged: list[dict[str, object]] = []
+    for detail in details:
+        payload = dict(detail)
+        label = labels_by_event.get(str(detail.get("event_id", "")))
+        if label:
+            payload.update(
+                {
+                    "benchmark_label": label.get("benchmark_label"),
+                    "review_status": label.get("review_status"),
+                    "reviewer": label.get("reviewer"),
+                    "label_source": label.get("label_source"),
+                    "confidence": label.get("confidence"),
+                    "review_notes": label.get("review_notes"),
+                    "benchmark_metadata": label.get("metadata"),
+                    "benchmark_updated_at": label.get("updated_at"),
+                }
+            )
+        merged.append(payload)
+    return merged
+
+
+def _benchmark_label_coverage(details: list[dict[str, object]]) -> dict[str, int]:
+    suspicious = 0
+    control = 0
+    for detail in details:
+        label = str(detail.get("benchmark_label", "")).strip().lower()
+        if label == "suspicious":
+            suspicious += 1
+        elif label == "control":
+            control += 1
+    return {
+        "reviewed_labels": suspicious + control,
+        "suspicious_labels": suspicious,
+        "control_labels": control,
+    }
 
 
 def main(argv: list[str] | None = None) -> int:

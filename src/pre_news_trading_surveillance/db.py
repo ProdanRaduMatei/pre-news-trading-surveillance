@@ -1018,6 +1018,55 @@ def load_scoring_event_details(
     return _fetch_dict_rows(db_path, query, params)
 
 
+def load_latest_benchmark_labels(
+    db_path: Path,
+    *,
+    review_status: str = "reviewed",
+    benchmark_labels: list[str] | None = None,
+    reviewer: str | None = None,
+) -> list[dict[str, object]]:
+    filters: list[str] = []
+    params: list[object] = []
+    if review_status:
+        filters.append("review_status = ?")
+        params.append(review_status)
+    if reviewer:
+        filters.append("reviewer = ?")
+        params.append(reviewer)
+    if benchmark_labels:
+        placeholders = ", ".join("?" for _ in benchmark_labels)
+        filters.append(f"benchmark_label IN ({placeholders})")
+        params.extend(benchmark_labels)
+
+    where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
+    query = f"""
+        SELECT
+          event_id,
+          benchmark_label,
+          review_status,
+          reviewer,
+          label_source,
+          confidence,
+          review_notes,
+          metadata_json,
+          CAST(created_at AS VARCHAR) AS created_at,
+          CAST(updated_at AS VARCHAR) AS updated_at
+        FROM (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (
+              PARTITION BY event_id
+              ORDER BY updated_at DESC, created_at DESC
+            ) AS row_number
+          FROM benchmark_event_labels
+          {where_sql}
+        ) latest
+        WHERE row_number = 1
+        ORDER BY updated_at DESC, event_id ASC
+    """
+    return _fetch_dict_rows(db_path, query, params)
+
+
 def load_benchmark_event_details(
     db_path: Path,
     *,
@@ -1116,7 +1165,7 @@ def load_benchmark_event_details(
 def list_benchmark_labels(
     db_path: Path,
     *,
-    limit: int = 100,
+    limit: int | None = 100,
     review_status: str | None = None,
     benchmark_label: str | None = None,
 ) -> list[dict[str, object]]:
@@ -1130,10 +1179,7 @@ def list_benchmark_labels(
         params.append(benchmark_label)
 
     where_sql = f"WHERE {' AND '.join(filters)}" if filters else ""
-    params.append(limit)
-    return _fetch_dict_rows(
-        db_path,
-        f"""
+    query = f"""
         SELECT
           event_id,
           benchmark_label,
@@ -1148,10 +1194,11 @@ def list_benchmark_labels(
         FROM benchmark_event_labels
         {where_sql}
         ORDER BY updated_at DESC, event_id ASC
-        LIMIT ?
-        """,
-        params,
-    )
+    """
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    return _fetch_dict_rows(db_path, query, params)
 
 
 def get_dashboard_summary(db_path: Path, *, max_first_public_at: str | None = None) -> dict[str, object]:

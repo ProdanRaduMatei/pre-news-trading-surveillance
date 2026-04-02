@@ -50,7 +50,7 @@
     "ranker_enabled": true,
     "reviewed_events": 24
   },
-  "generated_at": "2026-04-01T15:05:03+00:00",
+  "generated_at": "2026-04-02T05:42:48+00:00",
   "hybrid": {
     "evaluated_events": 12,
     "fold_count": 3,
@@ -156,10 +156,10 @@
     }
   },
   "source": {
-    "finished_at": "2026-04-01 18:05:03",
-    "markdown_report_path": "/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/reports/evaluation/backtest_report_20260401T150503Z.md",
-    "report_path": "/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/reports/evaluation/backtest_report_20260401T150503Z.json",
-    "run_id": "982e147f-ef03-4e8a-b49a-1ec47dbfc696"
+    "finished_at": "2026-04-02 08:42:48",
+    "markdown_report_path": "/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/reports/evaluation/backtest_report_20260402T054248Z.md",
+    "report_path": "/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/reports/evaluation/backtest_report_20260402T054248Z.json",
+    "run_id": "44a302bc-d978-4576-8cc6-1f3ff75bdbc3"
   },
   "status": "available"
 }

@@ -35,6 +35,9 @@ class MlScoringTests(unittest.TestCase):
                         contamination=0.12,
                         min_samples=12,
                         use_ranker=True,
+                        review_status="reviewed",
+                        benchmark_labels=["suspicious", "control"],
+                        reviewer=None,
                         parent_run_id=None,
                     )
                 )
@@ -49,6 +52,7 @@ class MlScoringTests(unittest.TestCase):
             self.assertEqual(manifest["samples"], 16)
             self.assertEqual(manifest["baseline"], "rules")
             self.assertEqual(manifest["ranker_status"], "trained")
+            self.assertEqual(manifest["ranker_training_source"], "weak_labels")
 
     def test_score_events_hybrid_uses_model_stack(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -63,6 +67,9 @@ class MlScoringTests(unittest.TestCase):
                         contamination=0.12,
                         min_samples=12,
                         use_ranker=True,
+                        review_status="reviewed",
+                        benchmark_labels=["suspicious", "control"],
+                        reviewer=None,
                         parent_run_id=None,
                     )
                 )
@@ -105,6 +112,36 @@ class MlScoringTests(unittest.TestCase):
             payload = detail["explanation_payload"]
             self.assertEqual(payload["model_stack"]["engine"], "rules")
             self.assertIn("fallback_reason", payload["model_stack"])
+
+    def test_train_model_stack_prefers_reviewed_labels_for_ranker_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._build_paths(tmpdir)
+            self._seed_feature_rich_events(paths.db_path, count=16)
+            self._seed_benchmark_labels(paths.db_path, count=10)
+
+            with patch("pre_news_trading_surveillance.cli.default_paths", return_value=paths):
+                exit_code = cmd_train_model_stack(
+                    Namespace(
+                        ticker=None,
+                        output_dir=paths.models_dir / "scoring" / "current",
+                        contamination=0.12,
+                        min_samples=12,
+                        use_ranker=True,
+                        review_status="reviewed",
+                        benchmark_labels=["suspicious", "control"],
+                        reviewer="tester",
+                        parent_run_id=None,
+                    )
+                )
+
+            self.assertEqual(exit_code, 0)
+            manifest = json.loads(
+                (paths.models_dir / "scoring" / "current" / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["ranker_training_source"], "reviewed_labels")
+            self.assertEqual(manifest["reviewed_label_count"], 10)
+            self.assertEqual(manifest["reviewed_positive_labels"], 5)
+            self.assertEqual(manifest["reviewed_control_labels"], 5)
 
     def _build_paths(self, tmpdir: str):
         root = Path(tmpdir)
@@ -195,6 +232,27 @@ class MlScoringTests(unittest.TestCase):
         db.upsert_event_market_features(db_path, daily_features)
         db.upsert_event_market_features_minute(db_path, minute_features)
         return event_ids
+
+    def _seed_benchmark_labels(self, db_path: Path, *, count: int) -> None:
+        from pre_news_trading_surveillance.domain import BenchmarkLabel
+
+        labels = []
+        for index in range(count):
+            labels.append(
+                BenchmarkLabel(
+                    event_id=f"evt-{index:03d}",
+                    benchmark_label="suspicious" if index % 2 == 0 else "control",
+                    review_status="reviewed",
+                    reviewer="tester",
+                    label_source="manual_review",
+                    confidence=0.9,
+                    review_notes="synthetic label",
+                    metadata_json="{}",
+                    created_at="2024-03-02T00:00:00+00:00",
+                    updated_at="2024-03-02T00:00:00+00:00",
+                )
+            )
+        db.upsert_benchmark_labels(db_path, labels)
 
 
 if __name__ == "__main__":

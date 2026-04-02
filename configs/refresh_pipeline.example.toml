@@ -40,6 +40,28 @@ sentiment_model = ""
 novelty_backend = "lexical"
 novelty_model = ""
 
+[model]
+enabled = true
+output_dir = "data/models/scoring/current"
+contamination = 0.12
+min_samples = 12
+use_ranker = true
+review_status = "reviewed"
+benchmark_labels = ["suspicious", "control"]
+reviewer = ""
+
+[evaluation]
+enabled = true
+review_status = "reviewed"
+benchmark_labels = ["suspicious", "control"]
+reviewer = ""
+folds = 3
+min_train_size = 12
+k_values = [5, 10, 25]
+contamination = 0.12
+use_ranker = true
+output_dir = "reports/evaluation"
+
 [publish]
 enabled = true
 output_dir = "data/publish/current"

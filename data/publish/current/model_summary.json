@@ -1,0 +1,26 @@
+{
+  "engine_requested": "auto",
+  "engine_used": "hybrid",
+  "feature_count": 27,
+  "notice": "The latest successful scoring run used the trained anomaly stack. The LightGBM ranker was trained on reviewed suspicious/control benchmark labels.",
+  "ranker_enabled": true,
+  "ranker_reason": "",
+  "ranker_status": "trained",
+  "ranker_training_source": "reviewed_labels",
+  "reviewed_control_labels": 12,
+  "reviewed_label_count": 24,
+  "reviewed_positive_labels": 12,
+  "score_run": {
+    "finished_at": "2026-04-02 08:42:47",
+    "run_id": "378add61-99fa-45e0-ae14-90b122ee3501",
+    "started_at": "2026-04-02 08:42:40.794193"
+  },
+  "status": "available",
+  "train_run": {
+    "finished_at": "2026-04-02 08:42:40",
+    "run_id": "2b2162a0-3887-4a19-8a63-96fddeb2049f",
+    "started_at": "2026-04-02 08:42:39.893955"
+  },
+  "trained_at": "2026-04-02T05:42:40+00:00",
+  "training_samples": 1993
+}

@@ -11,17 +11,23 @@
   "explanation_payload": {
     "components": {
       "alignment_component": 0.058,
+      "anomaly_score": 0.5996,
+      "hybrid_score": 0.6412,
       "impact_score": 0.6,
       "intraday_component": 0.0,
       "novelty": 1.0,
+      "ranker_score": 0.8069,
       "source_quality": 1.0,
       "volume_component": 0.9167
     },
     "model_stack": {
+      "anomaly_score": 0.5996,
       "baseline": "rules",
-      "engine": "rules",
-      "fallback_reason": null,
-      "requested_engine": "rules"
+      "engine": "hybrid",
+      "final_score": 0.6412,
+      "model_trained_at": "2026-04-02T05:42:40+00:00",
+      "ranker_score": 0.8069,
+      "ranker_status": "trained"
     },
     "signals": {
       "classifier_backend": "sec_item_rules",
@@ -41,7 +47,7 @@
       "volume_z_5d": 0.9432954882390344,
       "volume_z_60m": null
     },
-    "summary": "Scored with the rule baseline only. Flagged because pre-event 1D return was 1.02%, 5D drift was 3.09%, 1D volume z-score was 3.67, event sentiment was neutral, sentiment score was 0.00, impact prior was 0.60, novelty was 1.00, classification used sec_item_rules, sentiment used heuristic, and novelty used lexical."
+    "summary": "Hybrid anomaly stack scored this event at 64.12. rule baseline contributed 0.54. isolation forest anomaly score was 0.60. LightGBM ranker score was 0.81. models were trained at 2026-04-02T05:42:40+00:00. Flagged because pre-event 1D return was 1.02%, 5D drift was 3.09%, 1D volume z-score was 3.67, event sentiment was neutral, sentiment score was 0.00, impact prior was 0.60, novelty was 1.00, classification used sec_item_rules, sentiment used heuristic, and novelty used lexical.."
   },
   "first_public_at": "2025-12-05 19:31:42",
   "gap_pct": 0.0008912655971478056,
@@ -64,7 +70,7 @@
   "realized_vol_60m": null,
   "rule_score": 0.5407,
   "score_band": "Medium",
-  "scored_at": "2026-04-01 14:42:19",
+  "scored_at": "2026-04-02 05:42:41",
   "sec_items_json": "[\"5.02\"]",
   "sentiment_backend": "heuristic",
   "sentiment_label": "neutral",
@@ -74,7 +80,7 @@
   "source_table": "raw_filings",
   "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000114036125044561/ef20060722_8k.htm",
   "summary": "Apple Inc. disclosed a 8-K filing categorized as executive_change using sec_item_rules. Primary document description: 8-K. SEC items: 5.02.",
-  "suspiciousness_score": 54.07,
+  "suspiciousness_score": 64.12,
   "ticker": "AAPL",
   "timestamp_confidence": "high",
   "title": "8-K",

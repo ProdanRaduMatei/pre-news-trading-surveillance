@@ -8,6 +8,7 @@ Pre-News Trading Surveillance is a public-facing research platform for ranking u
 - NLP enrichment such as finance sentiment, event typing, and novelty
 - market anomaly features over pre-event windows
 - suspiciousness ranking with explainable outputs
+- automated model retraining and reviewed-benchmark backtests during full refresh runs
 - public serving architecture with conservative product language
 
 ## What Is Implemented Today
@@ -28,6 +29,8 @@ Pre-News Trading Surveillance is a public-facing research platform for ranking u
   - ingests minute market bars from CSV
   - computes daily pre-event market features
   - computes minute pre-event market features
+  - trains a hybrid anomaly stack with reviewed-label-aware ranker support
+  - refreshes reviewed benchmark reports and public model/evaluation summaries
   - assigns explainable suspiciousness scores
   - serves ranked events from a public dashboard plus JSON API
 
@@ -128,7 +131,10 @@ pnts score-events
 Train the anomaly stack and then score with the hybrid engine:
 
 ```bash
-pnts train-model-stack --min-samples 12
+pnts train-model-stack \
+  --min-samples 12 \
+  --review-status reviewed \
+  --benchmark-labels suspicious control
 pnts score-events --engine hybrid
 ```
 
@@ -218,6 +224,7 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - top-level coverage, score, and freshness metrics
 - public methodology, evaluation, and limitation pages linked directly from the dashboard
 - an evaluation snapshot panel when a reviewed backtest summary has been published
+- live model-status metadata showing whether the public surface is running hybrid scoring or a rule fallback
 - breakdowns for score bands, event types, top tickers, and recent activity
 - a filterable ranked event feed
 - offset-based pagination, short-lived cache headers, and basic rate limiting on public API routes
@@ -229,6 +236,8 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 - The sample config lives at [configs/refresh_pipeline.example.toml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/configs/refresh_pipeline.example.toml).
 - Official issuer feed config lives at [configs/issuer_feeds.example.toml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/configs/issuer_feeds.example.toml).
 - GitHub Actions scheduling lives at [.github/workflows/refresh.yml](/Users/matei/AIFinanceAssistent/pre-news-trading-surveillance/.github/workflows/refresh.yml).
+- Full refresh mode now runs the complete lifecycle: ingestion, event build, feature compute, model retraining, scoring, reviewed-benchmark backtest refresh, and public snapshot publish.
+- Intraday mode stays lighter and skips retraining and backtests so the public site can refresh faster during the trading week.
 - The workflow assumes two repository secrets:
   - `SEC_USER_AGENT`
   - `ALPHAVANTAGE_API_KEY`
@@ -242,7 +251,7 @@ The app now includes a polished public dashboard served directly from FastAPI. I
 ## Published Snapshot Mode
 
 - The pipeline now produces a public JSON bundle under `data/publish/current`.
-- Published bundles are public-safe by default and apply a delayed visibility window before writing `summary.json`, `evaluation_summary.json`, `events.json`, and detail payloads.
+- Published bundles are public-safe by default and apply a delayed visibility window before writing `summary.json`, `evaluation_summary.json`, `model_summary.json`, `events.json`, and detail payloads.
 - Set `PNTS_API_DATA_SOURCE=published` to make the FastAPI app serve from the published bundle instead of DuckDB.
 - Override the bundle location with `PNTS_PUBLISHED_DATA_DIR=/absolute/path/to/published/bundle`.
 - Or point the deployed app at a remotely hosted bundle with `PNTS_PUBLISHED_DATA_BASE_URL=https://cdn.example.com/pnts/current`.
@@ -254,6 +263,11 @@ The app now includes a polished public dashboard served directly from FastAPI. I
   - `PNTS_PUBLIC_DELAY_MINUTES=1440`
   - `PNTS_RATE_LIMIT_MAX_REQUESTS=120`
   - `PNTS_RATE_LIMIT_WINDOW_SECONDS=60`
+- Public API summary surfaces include:
+  - `/summary`
+  - `/events`
+  - `/evaluation/summary`
+  - `/model/summary`
 - Optional object-storage upload is supported through S3-compatible settings in the refresh config and GitHub secrets such as:
   - `PUBLISH_S3_BUCKET`
   - `PUBLISH_S3_REGION`

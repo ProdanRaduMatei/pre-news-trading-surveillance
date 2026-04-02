@@ -57,6 +57,7 @@ Scheduled refresh automation now lives in [.github/workflows/refresh.yml](/Users
 - weekday hourly intraday refresh
 - weekday full refresh
 - manual `workflow_dispatch` for either mode
+- model retraining and reviewed-benchmark backtest refresh during full runs
 - published snapshot generation on every refresh run
 - optional S3-compatible upload for the published bundle
 
@@ -147,5 +148,7 @@ Recommended deploy posture:
   - canonical events
   - daily features
   - minute features
+  - model retraining
   - scores
+  - reviewed benchmark backtest refresh
   - published snapshot

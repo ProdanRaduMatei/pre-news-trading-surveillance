@@ -11,6 +11,8 @@ from . import rules
 
 MODEL_BUNDLE_FILENAME = "model_bundle.pkl"
 MODEL_MANIFEST_FILENAME = "manifest.json"
+POSITIVE_BENCHMARK_LABEL = "suspicious"
+CONTROL_BENCHMARK_LABEL = "control"
 
 NUMERIC_FEATURES = [
     "sentiment_score",
@@ -124,6 +126,10 @@ def train_model_stack(
     ranker_bounds: tuple[float, float] | None = None
     ranker_status = "disabled"
     ranker_reason = ""
+    ranker_training_source = "none"
+    reviewed_label_count = 0
+    reviewed_positive_labels = 0
+    reviewed_control_labels = 0
 
     if enable_ranker:
         try:
@@ -132,9 +138,24 @@ def train_model_stack(
             ranker_status = "unavailable"
             ranker_reason = str(exc)
         else:
-            if len(set(int(label) for label in relevance.tolist())) < 2:
+            reviewed_ranker_data = _reviewed_ranker_training_data(sorted_details)
+            if reviewed_ranker_data is not None:
+                ranker_X, ranker_y = reviewed_ranker_data
+                reviewed_label_count = int(len(ranker_y))
+                reviewed_positive_labels = int(sum(1 for value in ranker_y if int(value) > 0))
+                reviewed_control_labels = int(sum(1 for value in ranker_y if int(value) <= 0))
+                ranker_training_source = "reviewed_labels"
+            else:
+                ranker_X = X
+                ranker_y = relevance
+                ranker_training_source = "weak_labels"
+
+            if len(set(int(label) for label in ranker_y.tolist())) < 2:
                 ranker_status = "skipped"
-                ranker_reason = "Weak relevance labels collapsed to a single class."
+                ranker_reason = (
+                    "Ranker labels collapsed to a single class after applying reviewed-label coverage and "
+                    "fallback logic."
+                )
             else:
                 ranker_model = LGBMRanker(
                     objective="lambdarank",
@@ -146,8 +167,8 @@ def train_model_stack(
                     n_jobs=1,
                     verbosity=-1,
                 )
-                ranker_model.fit(X, relevance, group=[len(sorted_details)])
-                ranker_raw = ranker_model.booster_.predict(X)
+                ranker_model.fit(ranker_X, ranker_y, group=[len(ranker_y)])
+                ranker_raw = ranker_model.booster_.predict(ranker_X)
                 _, ranker_bounds = _normalize_with_bounds(ranker_raw)
                 ranker_status = "trained"
     else:
@@ -175,6 +196,10 @@ def train_model_stack(
         "ranker_status": ranker_status,
         "ranker_reason": ranker_reason,
         "ranker_enabled": ranker_model is not None,
+        "ranker_training_source": ranker_training_source,
+        "reviewed_label_count": reviewed_label_count,
+        "reviewed_positive_labels": reviewed_positive_labels,
+        "reviewed_control_labels": reviewed_control_labels,
         "model_bundle_path": str(bundle_path),
     }
     manifest_path = output_dir / MODEL_MANIFEST_FILENAME
@@ -385,6 +410,37 @@ def _weak_relevance_labels(values) -> Any:
         return np.asarray([], dtype=int)
     quantiles = np.quantile(values, [0.5, 0.75, 0.9])
     return np.digitize(values, bins=quantiles, right=False).astype(int)
+
+
+def _reviewed_ranker_training_data(details: list[dict[str, object]]) -> tuple[Any, Any] | None:
+    labeled_details = [
+        detail
+        for detail in details
+        if str(detail.get("benchmark_label", "")).strip().lower()
+        in {POSITIVE_BENCHMARK_LABEL, CONTROL_BENCHMARK_LABEL}
+    ]
+    if len(labeled_details) < 6:
+        return None
+
+    positive_count = sum(
+        1
+        for detail in labeled_details
+        if str(detail.get("benchmark_label", "")).strip().lower() == POSITIVE_BENCHMARK_LABEL
+    )
+    control_count = len(labeled_details) - positive_count
+    if positive_count < 2 or control_count < 2:
+        return None
+
+    np = _require_numpy()
+    X = build_feature_matrix(labeled_details)
+    y = np.asarray(
+        [
+            3 if str(detail.get("benchmark_label", "")).strip().lower() == POSITIVE_BENCHMARK_LABEL else 0
+            for detail in labeled_details
+        ],
+        dtype=int,
+    )
+    return X, y
 
 
 def _normalize_with_bounds(values) -> tuple[Any, tuple[float, float]]:

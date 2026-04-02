@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .. import db
 from ..evaluation.public_summary import load_public_evaluation_summary
+from ..scoring.public_summary import load_public_model_summary
 from ..serve_policy import ServePolicy
 
 
@@ -15,6 +16,7 @@ class SnapshotBundle:
     manifest: dict[str, object]
     summary: dict[str, object]
     evaluation_summary: dict[str, object] | None
+    model_summary: dict[str, object] | None
     events: list[dict[str, object]]
     details: dict[str, dict[str, object]]
 
@@ -28,6 +30,8 @@ def build_snapshot_bundle(
     effective_policy = policy or ServePolicy()
     visible_before = effective_policy.cutoff_at_iso()
     summary = db.get_dashboard_summary(db_path, max_first_public_at=visible_before)
+    model_dir = _default_model_dir_for_db(db_path)
+    model_summary = load_public_model_summary(db_path, model_dir=model_dir)
     events = db.list_ranked_events(
         db_path=db_path,
         limit=events_limit,
@@ -46,6 +50,7 @@ def build_snapshot_bundle(
     }
     generated_at = _utc_now_iso()
     evaluation_summary = load_public_evaluation_summary(db_path)
+    summary["model"] = model_summary
     manifest = {
         "generated_at": generated_at,
         "events_limit": events_limit,
@@ -53,11 +58,15 @@ def build_snapshot_bundle(
         "format_version": 1,
         "policy": effective_policy.metadata(),
         "evaluation_status": (evaluation_summary or {}).get("status"),
+        "model_status": (model_summary or {}).get("status"),
+        "engine_used": (model_summary or {}).get("engine_used"),
+        "model_trained_at": (model_summary or {}).get("trained_at"),
     }
     return SnapshotBundle(
         manifest=manifest,
         summary=summary,
         evaluation_summary=evaluation_summary,
+        model_summary=model_summary,
         events=events,
         details=details,
     )
@@ -78,6 +87,10 @@ def write_snapshot_bundle(bundle: SnapshotBundle, output_dir: Path) -> Path:
     )
     (output_dir / "evaluation_summary.json").write_text(
         json.dumps(bundle.evaluation_summary or {}, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    (output_dir / "model_summary.json").write_text(
+        json.dumps(bundle.model_summary or {}, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     (output_dir / "events.json").write_text(
@@ -119,6 +132,13 @@ def load_snapshot_evaluation_summary(output_dir: Path) -> dict[str, object] | No
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def load_snapshot_model_summary(output_dir: Path) -> dict[str, object] | None:
+    path = output_dir / "model_summary.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def load_snapshot_event(output_dir: Path, event_id: str) -> dict[str, object] | None:
     path = output_dir / "events" / f"{event_id}.json"
     if not path.exists():
@@ -128,3 +148,11 @@ def load_snapshot_event(output_dir: Path, event_id: str) -> dict[str, object] | 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _default_model_dir_for_db(db_path: Path) -> Path:
+    if db_path.parent.name == "gold" and db_path.parent.parent.name == "data":
+        project_root = db_path.parent.parent.parent
+    else:
+        project_root = db_path.parent
+    return project_root / "data" / "models" / "scoring" / "current"

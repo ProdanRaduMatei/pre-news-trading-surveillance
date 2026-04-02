@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .. import db
 from ..evaluation.public_summary import load_public_evaluation_summary
 from ..publish.store import PublishedSnapshotStore, RemotePublishedSnapshotStore
+from ..scoring.public_summary import load_public_model_summary, pending_public_model_summary
 from ..serve_policy import ServePolicy, parse_datetime, policy_from_env
 from ..settings import default_paths
 from ..ui.docs import render_markdown_page
@@ -184,9 +185,20 @@ def summary() -> dict[str, object]:
     payload["api"] = {"name": app.title, "version": app.version}
     payload["policy"] = policy.metadata()
     payload["evaluation"] = _evaluation_summary(paths, store)
+    payload["model"] = _model_summary(paths, store)
     if manifest is not None:
         payload["manifest"] = manifest
     return payload
+
+
+@app.get("/model/summary")
+def model_summary() -> dict[str, object]:
+    paths = default_paths()
+    store = _published_store(paths)
+    return {
+        "model": _model_summary(paths, store),
+        "policy": _serve_policy().metadata(),
+    }
 
 
 @app.get("/evaluation/summary")
@@ -352,6 +364,17 @@ def _evaluation_summary(
     return load_public_evaluation_summary(paths.db_path)
 
 
+def _model_summary(
+    paths,
+    store: PublishedSnapshotStore | RemotePublishedSnapshotStore | None,
+) -> dict[str, object]:
+    if store is not None:
+        summary_payload = store.summary(policy=_serve_policy())
+        model = summary_payload.get("model")
+        return dict(model) if isinstance(model, dict) else pending_public_model_summary()
+    return load_public_model_summary(paths.db_path, model_dir=paths.models_dir / "scoring" / "current")
+
+
 def _load_doc_markdown(path: Path) -> str:
     if path.exists():
         return path.read_text(encoding="utf-8")
@@ -459,7 +482,12 @@ def _cache_control_for_path(path: str) -> str:
         return "public, max-age=0, s-maxage=300, stale-while-revalidate=86400"
     if path == "/":
         return "public, max-age=0, s-maxage=60, stale-while-revalidate=300"
-    if path.startswith("/summary") or path.startswith("/events") or path.startswith("/evaluation/summary"):
+    if (
+        path.startswith("/summary")
+        or path.startswith("/events")
+        or path.startswith("/evaluation/summary")
+        or path.startswith("/model/summary")
+    ):
         return "public, max-age=0, s-maxage=60, stale-while-revalidate=300"
     return "no-store"
 

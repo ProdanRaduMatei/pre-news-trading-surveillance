@@ -11,17 +11,23 @@
   "explanation_payload": {
     "components": {
       "alignment_component": 0.0,
+      "anomaly_score": 0.7062,
+      "hybrid_score": 0.4911,
       "impact_score": 0.95,
       "intraday_component": 0.0,
       "novelty": 1.0,
+      "ranker_score": 0.3553,
       "source_quality": 1.0,
       "volume_component": 0.0
     },
     "model_stack": {
+      "anomaly_score": 0.7062,
       "baseline": "rules",
-      "engine": "rules",
-      "fallback_reason": null,
-      "requested_engine": "rules"
+      "engine": "hybrid",
+      "final_score": 0.4911,
+      "model_trained_at": "2026-04-02T05:42:40+00:00",
+      "ranker_score": 0.3553,
+      "ranker_status": "trained"
     },
     "signals": {
       "classifier_backend": "sec_item_rules",
@@ -41,7 +47,7 @@
       "volume_z_5d": null,
       "volume_z_60m": null
     },
-    "summary": "Scored with the rule baseline only. Flagged because event sentiment was positive, sentiment score was 0.20, impact prior was 0.95, novelty was 1.00, classification used sec_item_rules, sentiment used heuristic, and novelty used lexical."
+    "summary": "Hybrid anomaly stack scored this event at 49.11. rule baseline contributed 0.39. isolation forest anomaly score was 0.71. LightGBM ranker score was 0.36. models were trained at 2026-04-02T05:42:40+00:00. Flagged because event sentiment was positive, sentiment score was 0.20, impact prior was 0.95, novelty was 1.00, classification used sec_item_rules, sentiment used heuristic, and novelty used lexical.."
   },
   "first_public_at": "2025-01-07 19:13:34",
   "gap_pct": null,
@@ -63,8 +69,8 @@
   "range_pct_60m": null,
   "realized_vol_60m": null,
   "rule_score": 0.3925,
-  "score_band": "Low",
-  "scored_at": "2026-04-01 14:42:19",
+  "score_band": "Medium",
+  "scored_at": "2026-04-02 05:42:42",
   "sec_items_json": "[\"2.01\", \"8.01\"]",
   "sentiment_backend": "heuristic",
   "sentiment_label": "positive",
@@ -74,7 +80,7 @@
   "source_table": "raw_filings",
   "source_url": "https://www.sec.gov/Archives/edgar/data/31235/000095017025002845/kodk-20241231.htm",
   "summary": "EASTMAN KODAK CO disclosed a 8-K filing categorized as mna using sec_item_rules. Primary document description: 8-K. SEC items: 2.01, 8.01.",
-  "suspiciousness_score": 39.25,
+  "suspiciousness_score": 49.11,
   "ticker": "KODK",
   "timestamp_confidence": "high",
   "title": "8-K",

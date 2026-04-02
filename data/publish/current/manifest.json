@@ -1,11 +1,14 @@
 {
+  "engine_used": "hybrid",
   "evaluation_status": "available",
   "events_count": 250,
   "events_limit": 250,
   "format_version": 1,
-  "generated_at": "2026-04-01T15:05:31+00:00",
+  "generated_at": "2026-04-02T05:42:50+00:00",
+  "model_status": "available",
+  "model_trained_at": "2026-04-02T05:42:40+00:00",
   "policy": {
-    "cutoff_at": "2026-03-31T15:05:31+00:00",
+    "cutoff_at": "2026-04-01T05:42:50+00:00",
     "data_source_mode": "published",
     "delay_label": "1 day",
     "delay_minutes": 1440,

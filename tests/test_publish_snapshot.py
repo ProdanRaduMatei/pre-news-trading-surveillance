@@ -38,13 +38,17 @@ class PublishSnapshotTests(unittest.TestCase):
             manifest = snapshot.load_snapshot_manifest(output_dir)
             summary = snapshot.load_snapshot_summary(output_dir)
             evaluation_summary = snapshot.load_snapshot_evaluation_summary(output_dir)
+            model_summary = snapshot.load_snapshot_model_summary(output_dir)
             events = snapshot.load_snapshot_events(output_dir)
 
             self.assertEqual(manifest["events_count"], 1)
             self.assertFalse(manifest["policy"]["public_safe_mode"])
             self.assertEqual(manifest["evaluation_status"], "available")
+            self.assertEqual(manifest["model_status"], "pending")
             self.assertEqual(summary["overview"]["total_events"], 1)
+            self.assertEqual(summary["model"]["status"], "pending")
             self.assertEqual(evaluation_summary["status"], "available")
+            self.assertEqual(model_summary["status"], "pending")
             self.assertEqual(events["count"], 1)
 
             store = PublishedSnapshotStore(output_dir)

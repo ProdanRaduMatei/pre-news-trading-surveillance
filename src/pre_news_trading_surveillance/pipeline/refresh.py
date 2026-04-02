@@ -19,7 +19,9 @@ FULL_REFRESH_STEPS: list[RefreshStep] = [
     "build_events",
     "compute_daily",
     "compute_minute",
+    "train_model",
     "score",
+    "backtest",
     "publish",
 ]
 INTRADAY_REFRESH_STEPS: list[RefreshStep] = [
@@ -87,6 +89,32 @@ class NlpRefreshConfig:
 
 
 @dataclass(frozen=True)
+class ModelRefreshConfig:
+    enabled: bool
+    output_dir: str
+    contamination: float
+    min_samples: int
+    use_ranker: bool
+    review_status: str
+    benchmark_labels: list[str]
+    reviewer: str | None
+
+
+@dataclass(frozen=True)
+class EvaluationRefreshConfig:
+    enabled: bool
+    review_status: str
+    benchmark_labels: list[str]
+    reviewer: str | None
+    folds: int
+    min_train_size: int
+    k_values: list[int]
+    contamination: float
+    use_ranker: bool
+    output_dir: str
+
+
+@dataclass(frozen=True)
 class PublishRefreshConfig:
     enabled: bool
     output_dir: str
@@ -115,6 +143,8 @@ class RefreshPipelineConfig:
     market_daily: MarketDailyRefreshConfig
     market_minute: MarketMinuteRefreshConfig
     nlp: NlpRefreshConfig
+    model: ModelRefreshConfig
+    evaluation: EvaluationRefreshConfig
     publish: PublishRefreshConfig
 
 
@@ -131,6 +161,8 @@ def load_refresh_config(config_path: Path) -> RefreshPipelineConfig:
     market_daily_payload = market_payload.get("daily", {})
     market_minute_payload = market_payload.get("minute", {})
     nlp_payload = payload.get("nlp", {})
+    model_payload = payload.get("model", {})
+    evaluation_payload = payload.get("evaluation", {})
     publish_payload = payload.get("publish", {})
 
     return RefreshPipelineConfig(
@@ -178,6 +210,38 @@ def load_refresh_config(config_path: Path) -> RefreshPipelineConfig:
             sentiment_model=_none_if_blank(nlp_payload.get("sentiment_model")),
             novelty_backend=str(nlp_payload.get("novelty_backend", "lexical")),
             novelty_model=_none_if_blank(nlp_payload.get("novelty_model")),
+        ),
+        model=ModelRefreshConfig(
+            enabled=bool(model_payload.get("enabled", True)),
+            output_dir=str(model_payload.get("output_dir", "data/models/scoring/current")),
+            contamination=float(model_payload.get("contamination", 0.12)),
+            min_samples=int(model_payload.get("min_samples", 12)),
+            use_ranker=bool(model_payload.get("use_ranker", True)),
+            review_status=str(model_payload.get("review_status", "reviewed")),
+            benchmark_labels=[
+                str(label).strip().lower()
+                for label in model_payload.get("benchmark_labels", ["suspicious", "control"])
+            ],
+            reviewer=_none_if_blank(model_payload.get("reviewer")),
+        ),
+        evaluation=EvaluationRefreshConfig(
+            enabled=bool(evaluation_payload.get("enabled", True)),
+            review_status=str(evaluation_payload.get("review_status", "reviewed")),
+            benchmark_labels=[
+                str(label).strip().lower()
+                for label in evaluation_payload.get("benchmark_labels", ["suspicious", "control"])
+            ],
+            reviewer=_none_if_blank(evaluation_payload.get("reviewer")),
+            folds=int(evaluation_payload.get("folds", 3)),
+            min_train_size=int(evaluation_payload.get("min_train_size", 12)),
+            k_values=[
+                int(value)
+                for value in evaluation_payload.get("k_values", [5, 10, 25])
+                if int(value) > 0
+            ],
+            contamination=float(evaluation_payload.get("contamination", 0.12)),
+            use_ranker=bool(evaluation_payload.get("use_ranker", True)),
+            output_dir=str(evaluation_payload.get("output_dir", "reports/evaluation")),
         ),
         publish=PublishRefreshConfig(
             enabled=bool(publish_payload.get("enabled", True)),
@@ -228,6 +292,7 @@ def run_refresh_pipeline(
     db.init_database(db_path=paths.db_path, schema_dir=paths.sql_dir)
 
     completed: list[str] = []
+    skipped: list[dict[str, str]] = []
     refresh_run_id = db.begin_ingestion_run(
         db_path=paths.db_path,
         pipeline_name="refresh_pipeline",
@@ -344,18 +409,88 @@ def run_refresh_pipeline(
                     cli_module.cmd_compute_minute_features,
                     Namespace(ticker=None, parent_run_id=refresh_run_id),
                 )
+            elif step == "train_model":
+                if not config.model.enabled:
+                    skipped.append({"step": step, "reason": "model training disabled"})
+                    continue
+                training_sample_count = len(db.load_scoring_event_details(paths.db_path))
+                if training_sample_count < config.model.min_samples:
+                    skipped.append(
+                        {
+                            "step": step,
+                            "reason": (
+                                f"insufficient scored events for training: {training_sample_count} < "
+                                f"{config.model.min_samples}"
+                            ),
+                        }
+                    )
+                    continue
+                _run_step(
+                    cli_module.cmd_train_model_stack,
+                    Namespace(
+                        ticker=None,
+                        output_dir=_resolve_project_path(config.model.output_dir, paths.root),
+                        contamination=config.model.contamination,
+                        min_samples=config.model.min_samples,
+                        use_ranker=config.model.use_ranker,
+                        review_status=config.model.review_status,
+                        benchmark_labels=config.model.benchmark_labels,
+                        reviewer=config.model.reviewer,
+                        parent_run_id=refresh_run_id,
+                    ),
+                )
             elif step == "score":
                 _run_step(
                     cli_module.cmd_score_events,
                     Namespace(
                         ticker=None,
                         engine="auto",
-                        model_dir=paths.models_dir / "scoring" / "current",
+                        model_dir=_resolve_project_path(config.model.output_dir, paths.root),
+                        parent_run_id=refresh_run_id,
+                    ),
+                )
+            elif step == "backtest":
+                if not config.evaluation.enabled:
+                    skipped.append({"step": step, "reason": "evaluation disabled"})
+                    continue
+                reviewed_count = len(
+                    db.load_benchmark_event_details(
+                        paths.db_path,
+                        review_status=config.evaluation.review_status,
+                        benchmark_labels=config.evaluation.benchmark_labels,
+                        reviewer=config.evaluation.reviewer,
+                    )
+                )
+                minimum_required = config.evaluation.min_train_size + config.evaluation.folds
+                if reviewed_count < minimum_required:
+                    skipped.append(
+                        {
+                            "step": step,
+                            "reason": (
+                                f"insufficient reviewed benchmark events: {reviewed_count} < "
+                                f"{minimum_required}"
+                            ),
+                        }
+                    )
+                    continue
+                _run_step(
+                    cli_module.cmd_run_backtest,
+                    Namespace(
+                        review_status=config.evaluation.review_status,
+                        benchmark_labels=config.evaluation.benchmark_labels,
+                        reviewer=config.evaluation.reviewer,
+                        folds=config.evaluation.folds,
+                        min_train_size=config.evaluation.min_train_size,
+                        k_values=config.evaluation.k_values,
+                        contamination=config.evaluation.contamination,
+                        use_ranker=config.evaluation.use_ranker,
+                        output_dir=_resolve_project_path(config.evaluation.output_dir, paths.root),
                         parent_run_id=refresh_run_id,
                     ),
                 )
             elif step == "publish":
                 if not config.publish.enabled:
+                    skipped.append({"step": step, "reason": "publish disabled"})
                     continue
                 _run_step(
                     cli_module.cmd_publish_snapshot,
@@ -396,6 +531,7 @@ def run_refresh_pipeline(
             row_count=len(completed),
             metadata={
                 "completed_steps": completed,
+                "skipped_steps": skipped,
                 "requested_steps": steps,
                 "tickers": config.tickers,
             },
@@ -410,6 +546,7 @@ def run_refresh_pipeline(
         row_count=len(completed),
         metadata={
             "completed_steps": completed,
+            "skipped_steps": skipped,
             "requested_steps": steps,
             "tickers": config.tickers,
         },
@@ -453,7 +590,11 @@ def _none_if_blank(value: object) -> str | None:
 
 
 def _resolve_publish_output_dir(output_dir: str, root: Path) -> Path:
-    path = Path(output_dir)
+    return _resolve_project_path(output_dir, root)
+
+
+def _resolve_project_path(path_value: str, root: Path) -> Path:
+    path = Path(path_value)
     if path.is_absolute():
         return path
     return root / path
