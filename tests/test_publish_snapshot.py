@@ -54,6 +54,7 @@ class PublishSnapshotTests(unittest.TestCase):
             store = PublishedSnapshotStore(output_dir)
             self.assertTrue(store.is_available())
             self.assertEqual(store.summary()["overview"]["tracked_tickers"], 1)
+            self.assertEqual(store.summary()["model"]["status"], "pending")
             self.assertEqual(store.evaluation_summary()["hybrid"]["top_decile_lift"], 2.7)
             self.assertEqual(len(store.list_events(limit=10, offset=0, ticker="AAPL")), 1)
             self.assertEqual(len(store.list_events(limit=10, ticker="MSFT")), 0)

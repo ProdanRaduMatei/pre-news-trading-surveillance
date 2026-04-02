@@ -127,6 +127,10 @@ class DashboardApiTests(unittest.TestCase):
                     self.assertEqual(summary_response.json()["evaluation"]["status"], "available")
                     self.assertEqual(summary_response.json()["model"]["status"], "pending")
 
+                    model_response = client.get("/model/summary")
+                    self.assertEqual(model_response.status_code, 200)
+                    self.assertEqual(model_response.json()["model"]["status"], "pending")
+
                     events_response = client.get("/events")
                     self.assertEqual(events_response.status_code, 200)
                     event_id = events_response.json()["items"][0]["event_id"]

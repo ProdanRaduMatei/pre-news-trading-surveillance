@@ -265,6 +265,11 @@ def _build_summary_from_events(
     *,
     base_summary: dict[str, object],
 ) -> dict[str, object]:
+    carried_fields = {
+        key: value
+        for key, value in base_summary.items()
+        if key not in {"overview", "score_bands", "event_types", "top_tickers", "recent_activity"}
+    }
     overview_base = dict(base_summary.get("overview", {}))
     dated_items = _sorted_datetimes(items)
     if not items or not dated_items:
@@ -282,6 +287,7 @@ def _build_summary_from_events(
             }
         )
         return {
+            **carried_fields,
             "overview": overview_base,
             "score_bands": [],
             "event_types": [],
@@ -304,6 +310,7 @@ def _build_summary_from_events(
         }
     )
     return {
+        **carried_fields,
         "overview": overview_base,
         "score_bands": _aggregate_counts(items, key="score_band", default="Unscored", top_n=None),
         "event_types": _aggregate_counts(items, key="event_type", default="unknown", top_n=8),
